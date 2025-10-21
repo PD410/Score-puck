@@ -11,10 +11,20 @@
 #include <Fonts/FreeSansBold18pt7b.h>
 #include <Fonts/FreeSans18pt7b.h>
 #include <Fonts/FreeSans12pt7b.h>
+#include <Preferences.h>
+#include <WebServer.h>
+#include <DNSServer.h>
+#include <ArduinoOTA.h>
 
-// WiFi credentials
-const char* ssid = "buttfuzz";
-const char* password = "rocket18";
+// Configuration storage
+Preferences preferences;
+WebServer webServer(80);
+DNSServer dnsServer;
+
+// WiFi credentials (defaults, can be changed via web portal)
+String wifiSSID = "buttfuzz";
+String wifiPassword = "rocket18";
+bool configMode = false;
 
 // Pin assignments
 #define TFT_CS   4
@@ -26,15 +36,74 @@ const char* password = "rocket18";
 // Initialize display
 Adafruit_GC9A01A tft(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCK, TFT_RST);
 
-// Colors
-#define METS_BLUE    0x001F   
-#define METS_ORANGE  0xFD20    
+// Base Colors
 #define WHITE        0xFFFF
 #define BLACK        0x0000
 #define GRAY         0x7BEF
 #define GREEN        0x07E0
 #define RED          0xF800
 #define YELLOW       0xFFE0
+
+// Default Mets colors (for backwards compatibility)
+#define METS_BLUE    0x001F
+#define METS_ORANGE  0xFD20
+
+// Team configuration structure
+struct TeamConfig {
+  int teamId;              // MLB team ID
+  String teamAbbr;         // Team abbreviation (e.g., "NYM")
+  String teamName;         // Full team name
+  uint16_t primaryColor;   // Primary team color (RGB565)
+  uint16_t secondaryColor; // Secondary team color (RGB565)
+  String timezone;         // Team timezone (e.g., "PST8PDT,M3.2.0,M11.1.0")
+};
+
+// Current configuration (loaded from Preferences)
+TeamConfig currentTeam;
+
+// MLB Team database with colors (RGB565 format)
+struct TeamInfo {
+  int id;
+  const char* abbr;
+  const char* name;
+  uint16_t primary;
+  uint16_t secondary;
+  const char* timezone;
+};
+
+// All 30 MLB teams with their colors and timezones
+const TeamInfo MLB_TEAMS[] = {
+  {121, "NYM", "New York Mets", 0x001F, 0xFD20, "EST5EDT,M3.2.0,M11.1.0"},           // Blue, Orange
+  {147, "NYY", "New York Yankees", 0x0014, 0xFFFF, "EST5EDT,M3.2.0,M11.1.0"},        // Navy, White
+  {110, "BAL", "Baltimore Orioles", 0xF920, 0x0000, "EST5EDT,M3.2.0,M11.1.0"},       // Orange, Black
+  {111, "BOS", "Boston Red Sox", 0xC000, 0x001F, "EST5EDT,M3.2.0,M11.1.0"},          // Red, Navy
+  {139, "TB", "Tampa Bay Rays", 0x0014, 0x4D5F, "EST5EDT,M3.2.0,M11.1.0"},           // Navy, Light Blue
+  {141, "TOR", "Toronto Blue Jays", 0x023F, 0x0014, "EST5EDT,M3.2.0,M11.1.0"},       // Blue, Navy
+  {114, "CLE", "Cleveland Guardians", 0xC000, 0x0014, "EST5EDT,M3.2.0,M11.1.0"},     // Red, Navy
+  {116, "DET", "Detroit Tigers", 0x0014, 0xFD20, "EST5EDT,M3.2.0,M11.1.0"},          // Navy, Orange
+  {118, "KC", "Kansas City Royals", 0x023F, 0xFFFF, "CST6CDT,M3.2.0,M11.1.0"},       // Blue, White
+  {142, "MIN", "Minnesota Twins", 0xC000, 0x0014, "CST6CDT,M3.2.0,M11.1.0"},         // Red, Navy
+  {145, "CWS", "Chicago White Sox", 0x0000, 0xFFFF, "CST6CDT,M3.2.0,M11.1.0"},       // Black, White
+  {117, "HOU", "Houston Astros", 0xFB00, 0x0014, "CST6CDT,M3.2.0,M11.1.0"},          // Orange, Navy
+  {108, "LAA", "Los Angeles Angels", 0xC000, 0xFFFF, "PST8PDT,M3.2.0,M11.1.0"},      // Red, White
+  {133, "OAK", "Oakland Athletics", 0x0660, 0xFE60, "PST8PDT,M3.2.0,M11.1.0"},       // Green, Gold
+  {136, "SEA", "Seattle Mariners", 0x0434, 0x0014, "PST8PDT,M3.2.0,M11.1.0"},        // Teal, Navy
+  {140, "TEX", "Texas Rangers", 0x023F, 0xC000, "CST6CDT,M3.2.0,M11.1.0"},           // Blue, Red
+  {144, "ATL", "Atlanta Braves", 0xC000, 0x0014, "EST5EDT,M3.2.0,M11.1.0"},          // Red, Navy
+  {146, "MIA", "Miami Marlins", 0x0000, 0xFD20, "EST5EDT,M3.2.0,M11.1.0"},           // Black, Orange
+  {143, "PHI", "Philadelphia Phillies", 0xC000, 0xFFFF, "EST5EDT,M3.2.0,M11.1.0"},   // Red, White
+  {120, "WSN", "Washington Nationals", 0xC000, 0x0014, "EST5EDT,M3.2.0,M11.1.0"},    // Red, Navy
+  {112, "CHC", "Chicago Cubs", 0x023F, 0xC000, "CST6CDT,M3.2.0,M11.1.0"},            // Blue, Red
+  {113, "CIN", "Cincinnati Reds", 0xC000, 0xFFFF, "EST5EDT,M3.2.0,M11.1.0"},         // Red, White
+  {158, "MIL", "Milwaukee Brewers", 0x0014, 0xFE60, "CST6CDT,M3.2.0,M11.1.0"},       // Navy, Gold
+  {134, "PIT", "Pittsburgh Pirates", 0x0000, 0xFE60, "EST5EDT,M3.2.0,M11.1.0"},      // Black, Gold
+  {138, "STL", "St. Louis Cardinals", 0xC000, 0xFFFF, "CST6CDT,M3.2.0,M11.1.0"},     // Red, White
+  {109, "ARI", "Arizona Diamondbacks", 0x9800, 0x0000, "MST7,M3.2.0,M11.1.0"},       // Sedona Red, Black
+  {115, "COL", "Colorado Rockies", 0x5015, 0x0000, "MST7MDT,M3.2.0,M11.1.0"},        // Purple, Black
+  {119, "LAD", "Los Angeles Dodgers", 0x023F, 0xFFFF, "PST8PDT,M3.2.0,M11.1.0"},     // Blue, White
+  {135, "SD", "San Diego Padres", 0x6320, 0xFE60, "PST8PDT,M3.2.0,M11.1.0"},         // Brown, Gold
+  {137, "SF", "San Francisco Giants", 0xFB00, 0x0000, "PST8PDT,M3.2.0,M11.1.0"}      // Orange, Black
+};
 
 // Off-season dates for 2026 - CHANGE THESE WHEN MLB ANNOUNCES OFFICIAL DATES
 #define SPRING_TRAINING_2026_YEAR  2026
@@ -103,12 +172,27 @@ void drawMetsLogoScaled(int x, int y, uint16_t logoColor, float scale);
 bool shouldShowGameTime(GameInfo game);
 int getDaysUntilDate(int targetYear, int targetMonth, int targetDay);
 
+// Configuration and web server functions
+void loadConfiguration();
+void saveConfiguration();
+void startConfigPortal();
+void handleRoot();
+void handleSaveConfig();
+void handleGetConfig();
+void handleRestart();
+void setupOTA();
+TeamInfo getTeamInfo(int teamId);
+void initializeTeamColors();
+
 void setup() {
   Serial.begin(115200);
   delay(1500);
-  
-  Serial.println("=== METS SCOREBOARD v3.0 - OFF-SEASON COUNTDOWN ===");
-  
+
+  Serial.println("=== MLB SCOREBOARD v4.0 - MULTI-TEAM EDITION ===");
+
+  // Load configuration from flash memory
+  loadConfiguration();
+
   if (TEST_MODE) {
     Serial.println("*** DEBUG MODE ENABLED ***");
     Serial.print("Current DEBUG_SCENARIO: ");
@@ -120,7 +204,7 @@ void setup() {
       default: Serial.println("Unknown scenario"); break;
     }
   }
-  
+
   // Initialize display pins
   Serial.println("Setting up display...");
   pinMode(TFT_CS, OUTPUT);
@@ -128,36 +212,59 @@ void setup() {
   pinMode(TFT_RST, OUTPUT);
   pinMode(TFT_MOSI, OUTPUT);
   pinMode(TFT_SCK, OUTPUT);
-  
+
   digitalWrite(TFT_CS, HIGH);
   digitalWrite(TFT_RST, HIGH);
-  
+
   digitalWrite(TFT_RST, LOW);
   delay(100);
   digitalWrite(TFT_RST, HIGH);
   delay(200);
-  
+
   tft.begin();
   Serial.println("✓ Display initialized");
-  
+
   initializeDMABuffers();
   showStartupScreen();
-  connectToWiFi();
-  
+
+  // Check if we should enter config mode (WiFi not configured or connection failed)
+  if (wifiSSID.length() == 0 || wifiPassword.length() == 0) {
+    Serial.println("No WiFi credentials - starting config portal");
+    configMode = true;
+    startConfigPortal();
+  } else {
+    connectToWiFi();
+  }
+
   if (WiFi.status() == WL_CONNECTED) {
+    // Setup OTA updates
+    setupOTA();
+
+    // Configure time with team-specific timezone
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-    setenv("TZ", "PST8PDT,M3.2.0,M11.1.0", 1);
+    setenv("TZ", currentTeam.timezone.c_str(), 1);
     tzset();
-    Serial.println("Time configured for Pacific Time Zone");
-    
+    Serial.printf("Time configured for %s timezone\n", currentTeam.timezone.c_str());
+
     delay(2000);
     struct tm timeinfo;
     if (getLocalTime(&timeinfo)) {
-      Serial.printf("Current local time: %04d-%02d-%02d %02d:%02d:%02d\n", 
+      Serial.printf("Current local time: %04d-%02d-%02d %02d:%02d:%02d\n",
                    timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
                    timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
     }
+
+    // Start web server for configuration
+    webServer.on("/", handleRoot);
+    webServer.on("/save", HTTP_POST, handleSaveConfig);
+    webServer.on("/config", HTTP_GET, handleGetConfig);
+    webServer.on("/restart", handleRestart);
+    webServer.begin();
+    Serial.println("Web server started on port 80");
+    Serial.printf("Configuration portal: http://%s/\n", WiFi.localIP().toString().c_str());
   }
+
+  Serial.printf("Configured Team: %s (%s)\n", currentTeam.teamName.c_str(), currentTeam.teamAbbr.c_str());
 }
 
 // NEW FUNCTION: Calculate days until a target date
@@ -193,7 +300,7 @@ GameInfo getTestGameData() {
   testGame.gameId = 123456;
   testGame.postponedTime = 0;
   testGame.metsHome = true;
-  testGame.homeTeam = "NYM";
+  testGame.homeTeam = currentTeam.teamAbbr;
   testGame.awayTeam = "BAL";
   testGame.opponent = "BAL";
   testGame.gameTime = "";
@@ -271,6 +378,19 @@ GameInfo getTestGameData() {
 }
 
 void loop() {
+  // Handle OTA updates
+  ArduinoOTA.handle();
+
+  // Handle web server requests
+  webServer.handleClient();
+
+  // Handle DNS for captive portal in config mode
+  if (configMode) {
+    dnsServer.processNextRequest();
+    delay(10);
+    return;
+  }
+
   if (TEST_MODE) {
     Serial.println("=== TEST MODE ACTIVE ===");
     GameInfo testGame = getTestGameData();
@@ -278,27 +398,27 @@ void loop() {
     delay(10000);
     return;
   }
-  
+
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi disconnected, showing offline screen");
     showOfflineScreen();
     delay(5000);
     return;
   }
-  
+
   String currentDate = getCurrentDate();
   Serial.println("Current date: " + currentDate);
-  
+
   Serial.println("Fetching today's game data...");
   GameInfo game = getGameData(currentDate);
-  
+
   if (!game.hasGame) {
     Serial.println("No game today, looking for next game...");
     game = getNextGame();
-    
+
     if (game.hasGame) {
       Serial.println("Found next game on: " + game.gameDate);
-      
+
       GameInfo prevGame = getPreviousGame();
       if (prevGame.hasGame && prevGame.isFinal) {
         game.inning = "LAST: " + String(prevGame.metsScore) + "-" + String(prevGame.oppScore) + " vs " + prevGame.opponent;
@@ -307,11 +427,20 @@ void loop() {
       Serial.println("No upcoming games found - showing off-season countdown");
     }
   }
-  
+
   displayGame(game);
-  
-  Serial.println("Waiting 60 seconds for next update...");
-  delay(60000);
+
+  // Use faster refresh rate during live games for better inning updates
+  int updateDelay = 60000; // Default: 60 seconds
+  if (game.isLive) {
+    updateDelay = 20000; // Live games: 20 seconds for faster inning/score updates
+    Serial.println("Live game detected - using 20 second update interval");
+    Serial.println("Current inning: " + game.inning);
+  } else {
+    Serial.println("Waiting 60 seconds for next update...");
+  }
+
+  delay(updateDelay);
 }
 
 bool shouldShowGameTime(GameInfo game) {
@@ -470,31 +599,31 @@ void clearScreenWithGradient() {
 }
 
 void showStartupScreen() {
-  Serial.println("Showing Mets Scorepuck loading screen...");
-  
+  Serial.println("Showing MLB Scoreboard loading screen...");
+
   drawBlueGradientBackgroundPremium();
-  
-  int logoX = 120 - (METS_LOGO_WIDTH / 2);   
-  int logoY = 120 - (METS_LOGO_HEIGHT / 2) - 25;  
-  
-  drawMetsLogoWithGradientBackground(logoX, logoY, METS_ORANGE);
-  
+
+  int logoX = 120 - (METS_LOGO_WIDTH / 2);
+  int logoY = 120 - (METS_LOGO_HEIGHT / 2) - 25;
+
+  drawMetsLogoWithGradientBackground(logoX, logoY, currentTeam.primaryColor);
+
   tft.setFont(&FreeSansBold12pt7b);
-  tft.setTextColor(WHITE);
-  
-  String text = "SCOREPUCK";
-  
+  tft.setTextColor(currentTeam.primaryColor);
+
+  String text = currentTeam.teamAbbr;
+
   int16_t x1, y1;
   uint16_t w, h;
   tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-  
+
   int textY = 120 + 70;
-  
+
   tft.setCursor(120 - w/2, textY);
   tft.print(text);
-  
+
   tft.setFont();
-  
+
   delay(3000);
 }
 
@@ -545,7 +674,7 @@ GameInfo getGameData(String date) {
   client.stop();
   
   HTTPClient http;
-  String url = "http://statsapi.mlb.com/api/v1/schedule/games/?sportId=1&teamId=121&date=" + date;
+  String url = "http://statsapi.mlb.com/api/v1/schedule/games/?sportId=1&teamId=" + String(currentTeam.teamId) + "&date=" + date;
   
   http.begin(url);
   http.setTimeout(20000);
@@ -582,22 +711,22 @@ GameInfo getGameData(String date) {
                   game.homeTeam = getTeamAbbreviation(homeTeamObj["name"].as<String>());
                 }
                 
-                if (homeTeamObj.containsKey("id") && homeTeamObj["id"].as<int>() == 121) {
+                if (homeTeamObj.containsKey("id") && homeTeamObj["id"].as<int>() == currentTeam.teamId) {
                   foundMets = true;
                   game.metsHome = true;
                 }
               }
-              
+
               if (teamsObj.containsKey("away") && teamsObj["away"].containsKey("team")) {
                 JsonObject awayTeamObj = teamsObj["away"]["team"];
-                
+
                 if (awayTeamObj.containsKey("abbreviation")) {
                   game.awayTeam = awayTeamObj["abbreviation"].as<String>();
                 } else if (awayTeamObj.containsKey("name")) {
                   game.awayTeam = getTeamAbbreviation(awayTeamObj["name"].as<String>());
                 }
-                
-                if (awayTeamObj.containsKey("id") && awayTeamObj["id"].as<int>() == 121) {
+
+                if (awayTeamObj.containsKey("id") && awayTeamObj["id"].as<int>() == currentTeam.teamId) {
                   foundMets = true;
                   game.metsHome = false;
                 }
@@ -848,22 +977,22 @@ void displayGame(GameInfo game) {
   
   // NEW OFF-SEASON COUNTDOWN DISPLAY
   if (!game.hasGame) {
-    // Draw Mets logo at top - smaller scale
-    int logoX = 120 - (METS_LOGO_WIDTH * 0.4 / 2);   
-    int logoY = 20;  
-    drawMetsLogoScaled(logoX, logoY, METS_ORANGE, 0.4);
-    
+    // Draw team logo at top - smaller scale
+    int logoX = 120 - (METS_LOGO_WIDTH * 0.4 / 2);
+    int logoY = 20;
+    drawMetsLogoScaled(logoX, logoY, currentTeam.primaryColor, 0.4);
+
     // Get days until spring training and opening day
-    int daysToSpringTraining = getDaysUntilDate(SPRING_TRAINING_2026_YEAR, 
-                                                  SPRING_TRAINING_2026_MONTH, 
+    int daysToSpringTraining = getDaysUntilDate(SPRING_TRAINING_2026_YEAR,
+                                                  SPRING_TRAINING_2026_MONTH,
                                                   SPRING_TRAINING_2026_DAY);
-    int daysToOpeningDay = getDaysUntilDate(OPENING_DAY_2026_YEAR, 
-                                             OPENING_DAY_2026_MONTH, 
+    int daysToOpeningDay = getDaysUntilDate(OPENING_DAY_2026_YEAR,
+                                             OPENING_DAY_2026_MONTH,
                                              OPENING_DAY_2026_DAY);
-    
+
     // Title
     tft.setFont(&FreeSansBold12pt7b);
-    tft.setTextColor(METS_ORANGE);
+    tft.setTextColor(currentTeam.primaryColor);
     
     String titleText = "OFF-SEASON";
     int16_t x1, y1;
@@ -889,7 +1018,7 @@ void displayGame(GameInfo game) {
     // Days until spring training - large number
     if (daysToSpringTraining >= 0) {
       tft.setFont(&FreeSansBold18pt7b);
-      tft.setTextColor(METS_ORANGE);
+      tft.setTextColor(currentTeam.primaryColor);
       
       String daysSTStr = String(daysToSpringTraining) + " DAYS";
       tft.getTextBounds(daysSTStr, 0, 0, &x1, &y1, &w, &h);
@@ -956,7 +1085,7 @@ void displayGame(GameInfo game) {
       uint16_t w1, h1, w2, h2, w3, h3;
       tft.getTextBounds(game.opponent, 0, 0, &x1, &y1, &w1, &h1);
       tft.getTextBounds(" @ ", 0, 0, &x1, &y1, &w2, &h2);
-      tft.getTextBounds("NYM", 0, 0, &x1, &y1, &w3, &h3);
+      tft.getTextBounds(currentTeam.teamAbbr, 0, 0, &x1, &y1, &w3, &h3);
       
       int totalWidth = w1 + w2 + w3;
       int startX = 120 - totalWidth/2;
@@ -967,15 +1096,15 @@ void displayGame(GameInfo game) {
       tft.setCursor(startX + w1, 50);
       tft.print(" @ ");
       
-      tft.setTextColor(METS_ORANGE);
+      tft.setTextColor(currentTeam.primaryColor);
       tft.setCursor(startX + w1 + w2, 50);
-      tft.print("NYM");
+      tft.print(currentTeam.teamAbbr);
     } else {
-      tft.setTextColor(METS_ORANGE);
+      tft.setTextColor(currentTeam.primaryColor);
       
       int16_t x1, y1;
       uint16_t w1, h1, w2, h2, w3, h3;
-      tft.getTextBounds("NYM", 0, 0, &x1, &y1, &w1, &h1);
+      tft.getTextBounds(currentTeam.teamAbbr, 0, 0, &x1, &y1, &w1, &h1);
       tft.getTextBounds(" @ ", 0, 0, &x1, &y1, &w2, &h2);
       tft.getTextBounds(game.opponent, 0, 0, &x1, &y1, &w3, &h3);
       
@@ -983,7 +1112,7 @@ void displayGame(GameInfo game) {
       int startX = 120 - totalWidth/2;
       
       tft.setCursor(startX, 50);
-      tft.print("NYM");
+      tft.print(currentTeam.teamAbbr);
       
       tft.setTextColor(WHITE);
       tft.setCursor(startX + w1, 50);
@@ -1028,11 +1157,11 @@ void displayGame(GameInfo game) {
           int prevOppScore = scoreInfo.substring(dashIndex + 1).toInt();
           
           tft.setFont(&FreeSansBold12pt7b);
-          tft.setTextColor(METS_ORANGE);
+          tft.setTextColor(currentTeam.primaryColor);
           
           int16_t x1, y1;
           uint16_t w1, h1, w2, h2;
-          tft.getTextBounds("NYM", 0, 0, &x1, &y1, &w1, &h1);
+          tft.getTextBounds(currentTeam.teamAbbr, 0, 0, &x1, &y1, &w1, &h1);
           tft.getTextBounds(prevOpponent, 0, 0, &x1, &y1, &w2, &h2);
           
           int spacing = 50;
@@ -1040,7 +1169,7 @@ void displayGame(GameInfo game) {
           int oppX = 120 + spacing/2;
           
           tft.setCursor(nymX, 155);
-          tft.print("NYM");
+          tft.print(currentTeam.teamAbbr);
           
           tft.setTextColor(WHITE);
           tft.setCursor(oppX, 155);
@@ -1098,7 +1227,7 @@ void displayGame(GameInfo game) {
       uint16_t w1, h1, w2, h2, w3, h3;
       tft.getTextBounds(game.opponent, 0, 0, &x1, &y1, &w1, &h1);
       tft.getTextBounds(" @ ", 0, 0, &x1, &y1, &w2, &h2);
-      tft.getTextBounds("NYM", 0, 0, &x1, &y1, &w3, &h3);
+      tft.getTextBounds(currentTeam.teamAbbr, 0, 0, &x1, &y1, &w3, &h3);
       
       int totalWidth = w1 + w2 + w3;
       int startX = 120 - totalWidth/2;
@@ -1109,15 +1238,15 @@ void displayGame(GameInfo game) {
       tft.setCursor(startX + w1, 50);
       tft.print(" @ ");
       
-      tft.setTextColor(METS_ORANGE);
+      tft.setTextColor(currentTeam.primaryColor);
       tft.setCursor(startX + w1 + w2, 50);
-      tft.print("NYM");
+      tft.print(currentTeam.teamAbbr);
     } else {
-      tft.setTextColor(METS_ORANGE);
+      tft.setTextColor(currentTeam.primaryColor);
       
       int16_t x1, y1;
       uint16_t w1, h1, w2, h2, w3, h3;
-      tft.getTextBounds("NYM", 0, 0, &x1, &y1, &w1, &h1);
+      tft.getTextBounds(currentTeam.teamAbbr, 0, 0, &x1, &y1, &w1, &h1);
       tft.getTextBounds(" @ ", 0, 0, &x1, &y1, &w2, &h2);
       tft.getTextBounds(game.opponent, 0, 0, &x1, &y1, &w3, &h3);
       
@@ -1125,7 +1254,7 @@ void displayGame(GameInfo game) {
       int startX = 120 - totalWidth/2;
       
       tft.setCursor(startX, 50);
-      tft.print("NYM");
+      tft.print(currentTeam.teamAbbr);
       
       tft.setTextColor(WHITE);
       tft.setCursor(startX + w1, 50);
@@ -1170,11 +1299,11 @@ void displayGame(GameInfo game) {
           int prevOppScore = scoreInfo.substring(dashIndex + 1).toInt();
           
           tft.setFont(&FreeSansBold12pt7b);
-          tft.setTextColor(METS_ORANGE);
+          tft.setTextColor(currentTeam.primaryColor);
           
           int16_t x1, y1;
           uint16_t w1, h1, w2, h2;
-          tft.getTextBounds("NYM", 0, 0, &x1, &y1, &w1, &h1);
+          tft.getTextBounds(currentTeam.teamAbbr, 0, 0, &x1, &y1, &w1, &h1);
           tft.getTextBounds(prevOpponent, 0, 0, &x1, &y1, &w2, &h2);
           
           int spacing = 50;
@@ -1182,7 +1311,7 @@ void displayGame(GameInfo game) {
           int oppX = 120 + spacing/2;
           
           tft.setCursor(nymX, 155);
-          tft.print("NYM");
+          tft.print(currentTeam.teamAbbr);
           
           tft.setTextColor(WHITE);
           tft.setCursor(oppX, 155);
@@ -1232,9 +1361,9 @@ void displayGame(GameInfo game) {
   
   // Show regular game data for all other states
   if (game.isLive) {
-    int logoX = 120 - (METS_LOGO_WIDTH * 0.5 / 2);   
-    int logoY = 20; 
-    drawMetsLogoScaled(logoX, logoY, METS_ORANGE, 0.5);
+    int logoX = 120 - (METS_LOGO_WIDTH * 0.5 / 2);
+    int logoY = 20;
+    drawMetsLogoScaled(logoX, logoY, currentTeam.primaryColor, 0.5);
     
     tft.setFont();
     tft.setTextSize(1);
@@ -1248,30 +1377,28 @@ void displayGame(GameInfo game) {
     tft.print(liveText);
     
     tft.setFont(&FreeSansBold12pt7b);
-    tft.setTextColor(WHITE);
     String awayTeamDisplay = game.awayTeam;
     String homeTeamDisplay = game.homeTeam;
-    
+
+    // Away team - always on left (consistent positioning)
     if (game.metsHome) {
-      tft.getTextBounds(awayTeamDisplay, 0, 0, &x1, &y1, &w, &h);
-      tft.setCursor(65 - w/2, 115);
-      tft.print(awayTeamDisplay);
-      
-      tft.setTextColor(METS_ORANGE);
-      tft.getTextBounds(homeTeamDisplay, 0, 0, &x1, &y1, &w, &h);
-      tft.setCursor(175 - w/2, 115);
-      tft.print(homeTeamDisplay);
-    } else {
-      tft.setTextColor(METS_ORANGE);
-      tft.getTextBounds(awayTeamDisplay, 0, 0, &x1, &y1, &w, &h);
-      tft.setCursor(80 - w/2, 120);
-      tft.print(awayTeamDisplay);
-      
       tft.setTextColor(WHITE);
-      tft.getTextBounds(homeTeamDisplay, 0, 0, &x1, &y1, &w, &h);
-      tft.setCursor(160 - w/2, 120);
-      tft.print(homeTeamDisplay);
+    } else {
+      tft.setTextColor(currentTeam.primaryColor);
     }
+    tft.getTextBounds(awayTeamDisplay, 0, 0, &x1, &y1, &w, &h);
+    tft.setCursor(65 - w/2, 115);
+    tft.print(awayTeamDisplay);
+
+    // Home team - always on right (consistent positioning)
+    if (game.metsHome) {
+      tft.setTextColor(currentTeam.primaryColor);
+    } else {
+      tft.setTextColor(WHITE);
+    }
+    tft.getTextBounds(homeTeamDisplay, 0, 0, &x1, &y1, &w, &h);
+    tft.setCursor(175 - w/2, 115);
+    tft.print(homeTeamDisplay);
     
     tft.drawLine(20, 125, 220, 125, WHITE);
     tft.drawLine(20, 126, 220, 126, WHITE);
@@ -1279,13 +1406,13 @@ void displayGame(GameInfo game) {
     tft.setFont(&FreeSansBold24pt7b);
     
     String awayScoreStr = String(game.metsHome ? game.oppScore : game.metsScore);
-    tft.setTextColor(game.metsHome ? WHITE : METS_ORANGE);
+    tft.setTextColor(game.metsHome ? WHITE : currentTeam.primaryColor);
     tft.getTextBounds(awayScoreStr, 0, 0, &x1, &y1, &w, &h);
     tft.setCursor(55 - w/2, 170);
     tft.print(awayScoreStr);
-    
+
     String homeScoreStr = String(game.metsHome ? game.metsScore : game.oppScore);
-    tft.setTextColor(game.metsHome ? METS_ORANGE : WHITE);
+    tft.setTextColor(game.metsHome ? currentTeam.primaryColor : WHITE);
     tft.getTextBounds(homeScoreStr, 0, 0, &x1, &y1, &w, &h);
     tft.setCursor(185 - w/2, 170);
     tft.print(homeScoreStr);
@@ -1312,7 +1439,7 @@ void displayGame(GameInfo game) {
       uint16_t w1, h1, w2, h2, w3, h3;
       tft.getTextBounds(game.opponent, 0, 0, &x1, &y1, &w1, &h1);
       tft.getTextBounds(" @ ", 0, 0, &x1, &y1, &w2, &h2);
-      tft.getTextBounds("NYM", 0, 0, &x1, &y1, &w3, &h3);
+      tft.getTextBounds(currentTeam.teamAbbr, 0, 0, &x1, &y1, &w3, &h3);
       
       int totalWidth = w1 + w2 + w3;
       int startX = 120 - totalWidth/2;
@@ -1323,15 +1450,15 @@ void displayGame(GameInfo game) {
       tft.setCursor(startX + w1, 50);
       tft.print(" @ ");
       
-      tft.setTextColor(METS_ORANGE);
+      tft.setTextColor(currentTeam.primaryColor);
       tft.setCursor(startX + w1 + w2, 50);
-      tft.print("NYM");
+      tft.print(currentTeam.teamAbbr);
     } else {
-      tft.setTextColor(METS_ORANGE);
+      tft.setTextColor(currentTeam.primaryColor);
       
       int16_t x1, y1;
       uint16_t w1, h1, w2, h2, w3, h3;
-      tft.getTextBounds("NYM", 0, 0, &x1, &y1, &w1, &h1);
+      tft.getTextBounds(currentTeam.teamAbbr, 0, 0, &x1, &y1, &w1, &h1);
       tft.getTextBounds(" @ ", 0, 0, &x1, &y1, &w2, &h2);
       tft.getTextBounds(game.opponent, 0, 0, &x1, &y1, &w3, &h3);
       
@@ -1339,7 +1466,7 @@ void displayGame(GameInfo game) {
       int startX = 120 - totalWidth/2;
       
       tft.setCursor(startX, 50);
-      tft.print("NYM");
+      tft.print(currentTeam.teamAbbr);
       
       tft.setTextColor(WHITE);
       tft.setCursor(startX + w1, 50);
@@ -1413,11 +1540,11 @@ void displayGame(GameInfo game) {
           int prevOppScore = scoreInfo.substring(dashIndex + 1).toInt();
           
           tft.setFont(&FreeSansBold12pt7b);
-          tft.setTextColor(METS_ORANGE);
+          tft.setTextColor(currentTeam.primaryColor);
           
           int16_t x1, y1;
           uint16_t w1, h1, w2, h2;
-          tft.getTextBounds("NYM", 0, 0, &x1, &y1, &w1, &h1);
+          tft.getTextBounds(currentTeam.teamAbbr, 0, 0, &x1, &y1, &w1, &h1);
           tft.getTextBounds(prevOpponent, 0, 0, &x1, &y1, &w2, &h2);
           
           int spacing = 50;
@@ -1425,7 +1552,7 @@ void displayGame(GameInfo game) {
           int oppX = 120 + spacing/2;
           
           tft.setCursor(nymX, 155);
-          tft.print("NYM");
+          tft.print(currentTeam.teamAbbr);
           
           tft.setTextColor(WHITE);
           tft.setCursor(oppX, 155);
@@ -1477,7 +1604,7 @@ void displayGame(GameInfo game) {
       uint16_t w1, h1, w2, h2, w3, h3;
       tft.getTextBounds(game.opponent, 0, 0, &x1, &y1, &w1, &h1);
       tft.getTextBounds(" @ ", 0, 0, &x1, &y1, &w2, &h2);
-      tft.getTextBounds("NYM", 0, 0, &x1, &y1, &w3, &h3);
+      tft.getTextBounds(currentTeam.teamAbbr, 0, 0, &x1, &y1, &w3, &h3);
       
       int totalWidth = w1 + w2 + w3;
       int startX = 120 - totalWidth/2;
@@ -1488,15 +1615,15 @@ void displayGame(GameInfo game) {
       tft.setCursor(startX + w1, 50);
       tft.print(" @ ");
       
-      tft.setTextColor(METS_ORANGE);
+      tft.setTextColor(currentTeam.primaryColor);
       tft.setCursor(startX + w1 + w2, 50);
-      tft.print("NYM");
+      tft.print(currentTeam.teamAbbr);
     } else {
-      tft.setTextColor(METS_ORANGE);
+      tft.setTextColor(currentTeam.primaryColor);
       
       int16_t x1, y1;
       uint16_t w1, h1, w2, h2, w3, h3;
-      tft.getTextBounds("NYM", 0, 0, &x1, &y1, &w1, &h1);
+      tft.getTextBounds(currentTeam.teamAbbr, 0, 0, &x1, &y1, &w1, &h1);
       tft.getTextBounds(" @ ", 0, 0, &x1, &y1, &w2, &h2);
       tft.getTextBounds(game.opponent, 0, 0, &x1, &y1, &w3, &h3);
       
@@ -1504,7 +1631,7 @@ void displayGame(GameInfo game) {
       int startX = 120 - totalWidth/2;
       
       tft.setCursor(startX, 50);
-      tft.print("NYM");
+      tft.print(currentTeam.teamAbbr);
       
       tft.setTextColor(WHITE);
       tft.setCursor(startX + w1, 50);
@@ -1557,18 +1684,18 @@ void displayGame(GameInfo game) {
     tft.println("VS");
     
     tft.setFont(&FreeSansBold18pt7b);
-    tft.setTextColor(METS_ORANGE);
-    
+    tft.setTextColor(currentTeam.primaryColor);
+
     String metsScoreStr = String(game.metsScore);
     tft.getTextBounds(metsScoreStr, 0, 0, &x1, &y1, &w, &h);
     tft.setCursor(120 - w/2, 165);
     tft.println(metsScoreStr);
     
     tft.setFont(&FreeSansBold12pt7b);
-    tft.setTextColor(METS_ORANGE);
-    tft.getTextBounds("NYM", 0, 0, &x1, &y1, &w, &h);
+    tft.setTextColor(currentTeam.primaryColor);
+    tft.getTextBounds(currentTeam.teamAbbr, 0, 0, &x1, &y1, &w, &h);
     tft.setCursor(120 - w/2, 195);
-    tft.println("NYM");
+    tft.println(currentTeam.teamAbbr);
   }
   
   tft.setFont();
@@ -1613,7 +1740,7 @@ void connectToWiFi() {
   int innerRadius = 100;
   
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
+  WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
   
   int attempts = 0;
   int maxAttempts = 30;
@@ -1710,28 +1837,28 @@ void connectToWiFi() {
 
 void showOfflineScreen() {
   Serial.println("Showing offline screen...");
-  
+
   clearScreenWithGradient();
-  
-  int logoX = 120 - (METS_LOGO_WIDTH / 2);   
-  int logoY = 120 - (METS_LOGO_HEIGHT / 2) - 25;  
-  
-  drawMetsLogoWithGradientBackground(logoX, logoY, METS_ORANGE);
-  
+
+  int logoX = 120 - (METS_LOGO_WIDTH / 2);
+  int logoY = 120 - (METS_LOGO_HEIGHT / 2) - 25;
+
+  drawMetsLogoWithGradientBackground(logoX, logoY, currentTeam.primaryColor);
+
   tft.setFont(&FreeSansBold12pt7b);
-  tft.setTextColor(METS_ORANGE);
-  
+  tft.setTextColor(currentTeam.primaryColor);
+
   String text = "OFFLINE";
-  
+
   int16_t x1, y1;
   uint16_t w, h;
   tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-  
+
   int textY = 120 + 70;
-  
+
   tft.setCursor(120 - w/2, textY);
   tft.print(text);
-  
+
   tft.setFont();
 }
 
@@ -1806,22 +1933,22 @@ uint16_t interpolateColor(uint16_t color1, uint16_t color2, float factor) {
 void drawMetsLogoScaled(int x, int y, uint16_t logoColor, float scale) {
   int scaledWidth = METS_LOGO_WIDTH * scale;
   int scaledHeight = METS_LOGO_HEIGHT * scale;
-  
+
   for (int16_t j = 0; j < scaledHeight; j++) {
     for (int16_t i = 0; i < scaledWidth; i++) {
       int16_t pixelX = x + i;
       int16_t pixelY = y + j;
-      
+
       if (pixelX < 0 || pixelX >= 240 || pixelY < 0 || pixelY >= 240) continue;
-      
+
       int origX = i / scale;
       int origY = j / scale;
-      
+
       if (origX >= METS_LOGO_WIDTH || origY >= METS_LOGO_HEIGHT) continue;
-      
+
       int16_t byteWidth = (METS_LOGO_WIDTH + 7) / 8;
       uint8_t byte = pgm_read_byte(&mets_logo_bitmap[origY * byteWidth + origX / 8]);
-      
+
       if (byte & (128 >> (origX & 7))) {
         tft.drawPixel(pixelX, pixelY, logoColor);
       } else {
@@ -1830,4 +1957,391 @@ void drawMetsLogoScaled(int x, int y, uint16_t logoColor, float scale) {
       }
     }
   }
+}
+
+// ========== CONFIGURATION FUNCTIONS ==========
+
+TeamInfo getTeamInfo(int teamId) {
+  for (int i = 0; i < 30; i++) {
+    if (MLB_TEAMS[i].id == teamId) {
+      return MLB_TEAMS[i];
+    }
+  }
+  // Default to Mets if not found
+  return MLB_TEAMS[0];
+}
+
+void loadConfiguration() {
+  Serial.println("Loading configuration from flash...");
+  preferences.begin("scoreboard", false);
+
+  // Load WiFi credentials
+  wifiSSID = preferences.getString("ssid", "buttfuzz");
+  wifiPassword = preferences.getString("password", "rocket18");
+
+  // Load team configuration
+  int teamId = preferences.getInt("teamId", 121); // Default: Mets
+
+  TeamInfo teamInfo = getTeamInfo(teamId);
+  currentTeam.teamId = teamInfo.id;
+  currentTeam.teamAbbr = String(teamInfo.abbr);
+  currentTeam.teamName = String(teamInfo.name);
+  currentTeam.primaryColor = teamInfo.primary;
+  currentTeam.secondaryColor = teamInfo.secondary;
+  currentTeam.timezone = String(teamInfo.timezone);
+
+  preferences.end();
+
+  Serial.printf("Loaded configuration:\n");
+  Serial.printf("  WiFi SSID: %s\n", wifiSSID.c_str());
+  Serial.printf("  Team: %s (%s)\n", currentTeam.teamName.c_str(), currentTeam.teamAbbr.c_str());
+  Serial.printf("  Timezone: %s\n", currentTeam.timezone.c_str());
+}
+
+void saveConfiguration() {
+  Serial.println("Saving configuration to flash...");
+  preferences.begin("scoreboard", false);
+
+  preferences.putString("ssid", wifiSSID);
+  preferences.putString("password", wifiPassword);
+  preferences.putInt("teamId", currentTeam.teamId);
+
+  preferences.end();
+  Serial.println("Configuration saved!");
+}
+
+void setupOTA() {
+  ArduinoOTA.setHostname("mlb-scoreboard");
+  ArduinoOTA.setPassword("scoreboard2025");
+
+  ArduinoOTA.onStart([]() {
+    String type;
+    if (ArduinoOTA.getCommand() == U_FLASH) {
+      type = "sketch";
+    } else {
+      type = "filesystem";
+    }
+    Serial.println("Start updating " + type);
+
+    clearScreenWithGradient();
+    tft.setFont(&FreeSansBold12pt7b);
+    tft.setTextColor(YELLOW);
+    int16_t x1, y1;
+    uint16_t w, h;
+    String text = "UPDATING";
+    tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+    tft.setCursor(120 - w/2, 120);
+    tft.print(text);
+    tft.setFont();
+  });
+
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\nUpdate complete!");
+    clearScreenWithGradient();
+    tft.setFont(&FreeSansBold12pt7b);
+    tft.setTextColor(GREEN);
+    int16_t x1, y1;
+    uint16_t w, h;
+    String text = "SUCCESS";
+    tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+    tft.setCursor(120 - w/2, 120);
+    tft.print(text);
+    tft.setFont();
+  });
+
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+  });
+
+  ArduinoOTA.begin();
+  Serial.println("OTA update enabled");
+  Serial.println("Hostname: mlb-scoreboard");
+  Serial.println("Password: scoreboard2025");
+}
+
+void startConfigPortal() {
+  Serial.println("Starting configuration portal...");
+
+  // Start Access Point
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP("MLB-Scoreboard-Setup");
+
+  IPAddress apIP(192, 168, 4, 1);
+  WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+
+  // Start DNS server for captive portal
+  dnsServer.start(53, "*", apIP);
+
+  // Setup web server routes
+  webServer.on("/", handleRoot);
+  webServer.on("/save", HTTP_POST, handleSaveConfig);
+  webServer.on("/config", HTTP_GET, handleGetConfig);
+  webServer.onNotFound(handleRoot); // Redirect all unknown requests to root for captive portal
+
+  webServer.begin();
+
+  Serial.println("Configuration portal started!");
+  Serial.println("Connect to WiFi: MLB-Scoreboard-Setup");
+  Serial.println("Then browse to: http://192.168.4.1");
+
+  // Show config mode on display
+  clearScreenWithGradient();
+  tft.setFont(&FreeSansBold12pt7b);
+  tft.setTextColor(YELLOW);
+  int16_t x1, y1;
+  uint16_t w, h;
+  String text = "CONFIG MODE";
+  tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+  tft.setCursor(120 - w/2, 100);
+  tft.print(text);
+
+  tft.setFont();
+  tft.setTextSize(1);
+  tft.setTextColor(WHITE);
+  String ssidText = "WiFi: MLB-Scoreboard-Setup";
+  int ssidWidth = ssidText.length() * 6;
+  tft.setCursor(120 - ssidWidth/2, 130);
+  tft.print(ssidText);
+
+  String ipText = "http://192.168.4.1";
+  int ipWidth = ipText.length() * 6;
+  tft.setCursor(120 - ipWidth/2, 145);
+  tft.print(ipText);
+}
+
+void handleRoot() {
+  String html = R"(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name='viewport' content='width=device-width, initial-scale=1'>
+  <title>MLB Scoreboard Configuration</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 50px auto;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      color: #555;
+      font-weight: bold;
+    }
+    input, select {
+      width: 100%;
+      padding: 10px;
+      border: 2px solid #ddd;
+      border-radius: 5px;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background: #5568d3;
+    }
+    .info {
+      background: #e7f3ff;
+      padding: 15px;
+      border-radius: 5px;
+      margin-bottom: 20px;
+      border-left: 4px solid #2196F3;
+    }
+    .current-config {
+      background: #f0f0f0;
+      padding: 15px;
+      border-radius: 5px;
+      margin-bottom: 20px;
+    }
+    .current-config h3 {
+      margin-top: 0;
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+  <div class='container'>
+    <h1>⚾ MLB Scoreboard Setup</h1>
+    <div class='info'>
+      <strong>Welcome!</strong> Configure your scoreboard to track your favorite MLB team.
+    </div>
+    <div class='current-config' id='currentConfig'>
+      <h3>Current Configuration</h3>
+      <p>Loading...</p>
+    </div>
+    <form id='configForm'>
+      <div class='form-group'>
+        <label>WiFi Network (SSID)</label>
+        <input type='text' name='ssid' id='ssid' required placeholder='Enter your WiFi name'>
+      </div>
+      <div class='form-group'>
+        <label>WiFi Password</label>
+        <input type='password' name='password' id='password' required placeholder='Enter your WiFi password'>
+      </div>
+      <div class='form-group'>
+        <label>Select Your Team</label>
+        <select name='teamId' id='teamId' required>
+          <option value='121'>New York Mets</option>
+          <option value='147'>New York Yankees</option>
+          <option value='110'>Baltimore Orioles</option>
+          <option value='111'>Boston Red Sox</option>
+          <option value='139'>Tampa Bay Rays</option>
+          <option value='141'>Toronto Blue Jays</option>
+          <option value='114'>Cleveland Guardians</option>
+          <option value='116'>Detroit Tigers</option>
+          <option value='118'>Kansas City Royals</option>
+          <option value='142'>Minnesota Twins</option>
+          <option value='145'>Chicago White Sox</option>
+          <option value='117'>Houston Astros</option>
+          <option value='108'>Los Angeles Angels</option>
+          <option value='133'>Oakland Athletics</option>
+          <option value='136'>Seattle Mariners</option>
+          <option value='140'>Texas Rangers</option>
+          <option value='144'>Atlanta Braves</option>
+          <option value='146'>Miami Marlins</option>
+          <option value='143'>Philadelphia Phillies</option>
+          <option value='120'>Washington Nationals</option>
+          <option value='112'>Chicago Cubs</option>
+          <option value='113'>Cincinnati Reds</option>
+          <option value='158'>Milwaukee Brewers</option>
+          <option value='134'>Pittsburgh Pirates</option>
+          <option value='138'>St. Louis Cardinals</option>
+          <option value='109'>Arizona Diamondbacks</option>
+          <option value='115'>Colorado Rockies</option>
+          <option value='119'>Los Angeles Dodgers</option>
+          <option value='135'>San Diego Padres</option>
+          <option value='137'>San Francisco Giants</option>
+        </select>
+      </div>
+      <button type='submit'>Save Configuration</button>
+    </form>
+  </div>
+  <script>
+    // Load current config
+    fetch('/config')
+      .then(r => r.json())
+      .then(data => {
+        document.getElementById('ssid').value = data.ssid;
+        document.getElementById('teamId').value = data.teamId;
+        document.getElementById('currentConfig').innerHTML =
+          '<h3>Current Configuration</h3>' +
+          '<p><strong>WiFi:</strong> ' + data.ssid + '</p>' +
+          '<p><strong>Team:</strong> ' + data.teamName + ' (' + data.teamAbbr + ')</p>';
+      });
+
+    // Handle form submission
+    document.getElementById('configForm').onsubmit = function(e) {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const data = Object.fromEntries(formData);
+
+      fetch('/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+      })
+      .then(r => r.text())
+      .then(msg => {
+        alert(msg);
+        if (msg.includes('Success')) {
+          setTimeout(() => {
+            if (confirm('Configuration saved! Restart the device now?')) {
+              fetch('/restart').then(() => {
+                alert('Device restarting... Please reconnect to your WiFi network.');
+              });
+            }
+          }, 500);
+        }
+      });
+    };
+  </script>
+</body>
+</html>
+)";
+
+  webServer.send(200, "text/html", html);
+}
+
+void handleSaveConfig() {
+  if (webServer.hasArg("plain")) {
+    String body = webServer.arg("plain");
+    DynamicJsonDocument doc(1024);
+    deserializeJson(doc, body);
+
+    wifiSSID = doc["ssid"].as<String>();
+    wifiPassword = doc["password"].as<String>();
+    int teamId = doc["teamId"].as<int>();
+
+    TeamInfo teamInfo = getTeamInfo(teamId);
+    currentTeam.teamId = teamInfo.id;
+    currentTeam.teamAbbr = String(teamInfo.abbr);
+    currentTeam.teamName = String(teamInfo.name);
+    currentTeam.primaryColor = teamInfo.primary;
+    currentTeam.secondaryColor = teamInfo.secondary;
+    currentTeam.timezone = String(teamInfo.timezone);
+
+    saveConfiguration();
+
+    webServer.send(200, "text/plain", "Success! Configuration saved. Restart the device to apply changes.");
+  } else {
+    webServer.send(400, "text/plain", "Invalid request");
+  }
+}
+
+void handleGetConfig() {
+  DynamicJsonDocument doc(512);
+  doc["ssid"] = wifiSSID;
+  doc["teamId"] = currentTeam.teamId;
+  doc["teamName"] = currentTeam.teamName;
+  doc["teamAbbr"] = currentTeam.teamAbbr;
+
+  String response;
+  serializeJson(doc, response);
+  webServer.send(200, "application/json", response);
+}
+
+void handleRestart() {
+  webServer.send(200, "text/plain", "Restarting...");
+  delay(1000);
+  ESP.restart();
 }
