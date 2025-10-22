@@ -1965,25 +1965,36 @@ void startConfigPortal() {
   configMode = true;
 
   Serial.println("Stopping any existing WiFi connections...");
-  WiFi.disconnect();
-  delay(100);
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  delay(500);
 
   // Start WiFi AP mode
   Serial.println("Starting Access Point...");
   WiFi.mode(WIFI_AP);
-  delay(100);
+  delay(500);
 
-  bool apStarted = WiFi.softAP(configSSID, configPassword);
+  // Configure AP with specific settings for better compatibility
+  // Using channel 1, no password (open network), max 4 connections
+  Serial.println("Configuring Access Point (OPEN - No Password)...");
+
+  bool apStarted = WiFi.softAP(configSSID, "", 1, 0, 4);
+
+  // Alternative: Try with password if open fails
+  if (!apStarted) {
+    Serial.println("Open AP failed, trying with password...");
+    apStarted = WiFi.softAP(configSSID, configPassword, 6, 0, 4);
+  }
 
   if (apStarted) {
     Serial.println("✓ Access Point started successfully!");
   } else {
     Serial.println("✗ Failed to start Access Point!");
-    Serial.println("Retrying with default settings...");
-    WiFi.softAP("ScorePuck", "scorepuck123");
+    Serial.println("Trying minimal configuration...");
+    WiFi.softAP("ScorePuck");
   }
 
-  delay(500);
+  delay(1000);
 
   IPAddress IP = WiFi.softAPIP();
   Serial.println();
@@ -1991,9 +2002,12 @@ void startConfigPortal() {
   Serial.println("Configuration Portal Started");
   Serial.println("==============================================");
   Serial.println("SSID: " + String(configSSID));
-  Serial.println("Password: " + String(configPassword));
+  Serial.println("Password: NONE (Open Network)");
   Serial.println("IP Address: " + IP.toString());
   Serial.println("URL: http://" + IP.toString());
+  Serial.println("==============================================");
+  Serial.println("Connect your phone to the WiFi network above");
+  Serial.println("Then open a browser and go to the URL above");
   Serial.println("==============================================");
   Serial.println();
 
@@ -2025,13 +2039,13 @@ void startConfigPortal() {
   tft.print(text3);
 
   tft.setTextColor(WHITE);
-  String text4 = "Password:";
+  String text4 = "NO PASSWORD";
   int width4 = text4.length() * 6;
   tft.setCursor(120 - width4/2, 125);
   tft.print(text4);
 
-  tft.setTextColor(METS_ORANGE);
-  String text5 = String(configPassword);
+  tft.setTextColor(GRAY);
+  String text5 = "(Open Network)";
   int width5 = text5.length() * 6;
   tft.setCursor(120 - width5/2, 140);
   tft.print(text5);
