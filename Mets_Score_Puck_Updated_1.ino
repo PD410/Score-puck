@@ -68,6 +68,9 @@ Adafruit_GC9A01A tft(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCK, TFT_RST);
 const bool TEST_MODE = false;
 const int DEBUG_SCENARIO = 2;
 
+// FORCE CONFIG MODE - Set to true to force configuration portal on boot
+const bool FORCE_CONFIG_MODE = false;
+
 // Game data structure
 struct GameInfo {
   bool hasGame;
@@ -123,6 +126,7 @@ bool shouldShowGameTime(GameInfo game);
 int getDaysUntilDate(int targetYear, int targetMonth, int targetDay);
 void loadConfiguration();
 void saveConfiguration();
+void clearConfiguration();
 void startConfigPortal();
 void handleRoot();
 void handleSave();
@@ -135,9 +139,17 @@ void setup() {
   delay(1500);
 
   Serial.println("=== MLB SCOREPUCK v4.0 - MULTI-TEAM CONFIGURABLE ===");
+  Serial.println();
 
   // Load saved configuration
   loadConfiguration();
+  Serial.println();
+
+  // Check if we should force config mode
+  if (FORCE_CONFIG_MODE) {
+    Serial.println("FORCE_CONFIG_MODE is enabled - entering config mode");
+    configMode = true;
+  }
   
   if (TEST_MODE) {
     Serial.println("*** DEBUG MODE ENABLED ***");
@@ -174,10 +186,20 @@ void setup() {
   showStartupScreen();
 
   // Check if we need to enter config mode (no WiFi credentials saved)
-  if (configuredSSID == "" || configMode) {
-    Serial.println("Entering configuration mode...");
+  Serial.println("Checking configuration status...");
+  if (configuredSSID == "" || configuredSSID.length() == 0) {
+    Serial.println("No WiFi credentials found - entering config mode");
+    configMode = true;
+  }
+
+  if (configMode || FORCE_CONFIG_MODE) {
+    Serial.println("==============================================");
+    Serial.println("ENTERING CONFIGURATION MODE");
+    Serial.println("==============================================");
     startConfigPortal();
   } else {
+    Serial.println("WiFi credentials found: " + configuredSSID);
+    Serial.println("Attempting to connect...");
     connectToWiFi();
   }
 
@@ -1927,17 +1949,53 @@ void saveConfiguration() {
   Serial.println("Configuration saved!");
 }
 
+void clearConfiguration() {
+  preferences.begin("scorepuck", false);
+  preferences.clear();
+  preferences.end();
+
+  Serial.println("Configuration cleared!");
+  Serial.println("Device will restart in config mode...");
+
+  delay(1000);
+  ESP.restart();
+}
+
 void startConfigPortal() {
   configMode = true;
 
-  // Start WiFi AP mode
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(configSSID, configPassword);
+  Serial.println("Stopping any existing WiFi connections...");
+  WiFi.disconnect();
+  delay(100);
 
+  // Start WiFi AP mode
+  Serial.println("Starting Access Point...");
+  WiFi.mode(WIFI_AP);
+  delay(100);
+
+  bool apStarted = WiFi.softAP(configSSID, configPassword);
+
+  if (apStarted) {
+    Serial.println("✓ Access Point started successfully!");
+  } else {
+    Serial.println("✗ Failed to start Access Point!");
+    Serial.println("Retrying with default settings...");
+    WiFi.softAP("ScorePuck", "scorepuck123");
+  }
+
+  delay(500);
+
+  IPAddress IP = WiFi.softAPIP();
+  Serial.println();
+  Serial.println("==============================================");
   Serial.println("Configuration Portal Started");
-  Serial.println("Connect to WiFi: " + String(configSSID));
+  Serial.println("==============================================");
+  Serial.println("SSID: " + String(configSSID));
   Serial.println("Password: " + String(configPassword));
-  Serial.println("Then go to: http://192.168.4.1");
+  Serial.println("IP Address: " + IP.toString());
+  Serial.println("URL: http://" + IP.toString());
+  Serial.println("==============================================");
+  Serial.println();
 
   // Display config mode on screen
   clearScreenWithGradient();
