@@ -1967,54 +1967,59 @@ void startConfigPortal() {
   Serial.println("Stopping any existing WiFi connections...");
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
-  delay(1000);
+  delay(2000);  // Longer delay for ESP32-S3
 
-  // Start WiFi AP mode
-  Serial.println("Starting Access Point...");
-  WiFi.mode(WIFI_AP);
-  delay(1000);
-
-  // Configure static IP for the AP
+  // Configure static IP for the AP BEFORE starting AP mode
   IPAddress local_IP(192, 168, 4, 1);
   IPAddress gateway(192, 168, 4, 1);
   IPAddress subnet(255, 255, 255, 0);
+
+  Serial.println("Setting AP mode...");
+  WiFi.mode(WIFI_AP);
+  delay(2000);  // Longer delay for ESP32-S3
 
   Serial.println("Configuring AP network settings...");
   Serial.println("  IP: " + local_IP.toString());
   Serial.println("  Gateway: " + gateway.toString());
   Serial.println("  Subnet: " + subnet.toString());
 
+  // Configure network settings
   if (!WiFi.softAPConfig(local_IP, gateway, subnet)) {
     Serial.println("✗ AP Config Failed!");
   } else {
     Serial.println("✓ AP Config successful");
   }
 
-  delay(500);
+  delay(1000);
 
-  // Configure AP with specific settings for better compatibility
-  // Using channel 1, no password (open network), max 4 connections, not hidden
-  Serial.println("Configuring Access Point (OPEN - No Password)...");
+  // Start Access Point with explicit parameters
+  // For ESP32-S3: SSID, password, channel, hidden, max_connections
+  Serial.println("Starting Access Point (OPEN - No Password)...");
+  Serial.println("  SSID: " + String(configSSID));
+  Serial.println("  Channel: 1");
+  Serial.println("  Max Connections: 4");
 
-  bool apStarted = WiFi.softAP(configSSID, "", 1, 0, 4);
+  // Try with no password, channel 1, not hidden, max 4 connections
+  bool apStarted = WiFi.softAP(configSSID.c_str(), NULL, 1, 0, 4);
 
-  // Alternative: Try with different channel if open fails
+  delay(2000);
+
   if (!apStarted) {
-    Serial.println("Channel 1 failed, trying channel 6...");
-    apStarted = WiFi.softAP(configSSID, "", 6, 0, 4);
+    Serial.println("  Failed on channel 1, trying channel 6...");
+    apStarted = WiFi.softAP(configSSID.c_str(), NULL, 6, 0, 4);
+    delay(2000);
   }
 
-  // Last resort: minimal config
   if (!apStarted) {
-    Serial.println("Trying minimal configuration...");
-    WiFi.softAPConfig(local_IP, gateway, subnet);
-    apStarted = WiFi.softAP("ScorePuck");
+    Serial.println("  Failed with parameters, trying simple mode...");
+    apStarted = WiFi.softAP(configSSID.c_str());
+    delay(2000);
   }
 
   if (apStarted) {
     Serial.println("✓ Access Point started successfully!");
   } else {
-    Serial.println("✗ Failed to start Access Point!");
+    Serial.println("✗ Access Point FAILED!");
   }
 
   delay(1000);
