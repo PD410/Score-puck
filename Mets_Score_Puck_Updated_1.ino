@@ -2000,19 +2000,19 @@ void startConfigPortal() {
   Serial.println("  Max Connections: 4");
 
   // Try with no password, channel 1, not hidden, max 4 connections
-  bool apStarted = WiFi.softAP(configSSID.c_str(), NULL, 1, 0, 4);
+  bool apStarted = WiFi.softAP(configSSID, NULL, 1, 0, 4);
 
   delay(2000);
 
   if (!apStarted) {
     Serial.println("  Failed on channel 1, trying channel 6...");
-    apStarted = WiFi.softAP(configSSID.c_str(), NULL, 6, 0, 4);
+    apStarted = WiFi.softAP(configSSID, NULL, 6, 0, 4);
     delay(2000);
   }
 
   if (!apStarted) {
     Serial.println("  Failed with parameters, trying simple mode...");
-    apStarted = WiFi.softAP(configSSID.c_str());
+    apStarted = WiFi.softAP(configSSID);
     delay(2000);
   }
 
