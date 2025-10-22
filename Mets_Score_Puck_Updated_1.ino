@@ -1967,62 +1967,62 @@ void startConfigPortal() {
   Serial.println("Stopping any existing WiFi connections...");
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
-  delay(2000);  // Longer delay for ESP32-S3
+  delay(2000);
 
-  // Configure static IP for the AP BEFORE starting AP mode
-  IPAddress local_IP(192, 168, 4, 1);
-  IPAddress gateway(192, 168, 4, 1);
+  Serial.println("Configuring network parameters...");
+  // Try different IP range - sometimes 192.168.1.x works better than 192.168.4.x on ESP32-S3
+  IPAddress local_IP(192, 168, 1, 1);
+  IPAddress gateway(192, 168, 1, 1);
   IPAddress subnet(255, 255, 255, 0);
 
-  Serial.println("Setting AP mode...");
-  WiFi.mode(WIFI_AP);
-  delay(2000);  // Longer delay for ESP32-S3
-
-  Serial.println("Configuring AP network settings...");
   Serial.println("  IP: " + local_IP.toString());
   Serial.println("  Gateway: " + gateway.toString());
   Serial.println("  Subnet: " + subnet.toString());
 
-  // Configure network settings
-  if (!WiFi.softAPConfig(local_IP, gateway, subnet)) {
-    Serial.println("✗ AP Config Failed!");
+  Serial.println("Setting WiFi mode to AP...");
+  WiFi.mode(WIFI_AP);
+  delay(3000);  // Even longer delay
+
+  Serial.println("Applying AP configuration...");
+  bool configOK = WiFi.softAPConfig(local_IP, gateway, subnet);
+
+  if (configOK) {
+    Serial.println("✓ Network configuration applied");
   } else {
-    Serial.println("✓ AP Config successful");
+    Serial.println("✗ Network configuration FAILED");
   }
-
-  delay(1000);
-
-  // Start Access Point with explicit parameters
-  // For ESP32-S3: SSID, password, channel, hidden, max_connections
-  Serial.println("Starting Access Point (OPEN - No Password)...");
-  Serial.println("  SSID: " + String(configSSID));
-  Serial.println("  Channel: 1");
-  Serial.println("  Max Connections: 4");
-
-  // Try with no password, channel 1, not hidden, max 4 connections
-  bool apStarted = WiFi.softAP(configSSID, NULL, 1, 0, 4);
 
   delay(2000);
 
-  if (!apStarted) {
-    Serial.println("  Failed on channel 1, trying channel 6...");
-    apStarted = WiFi.softAP(configSSID, NULL, 6, 0, 4);
-    delay(2000);
-  }
+  Serial.println("Starting Access Point...");
+  Serial.println("  SSID: " + String(configSSID));
+  Serial.println("  Password: NONE");
+  Serial.println("  Channel: 1");
 
-  if (!apStarted) {
-    Serial.println("  Failed with parameters, trying simple mode...");
-    apStarted = WiFi.softAP(configSSID);
-    delay(2000);
-  }
+  // Start AP - simple call first
+  bool apStarted = WiFi.softAP(configSSID);
+
+  delay(3000);  // Long delay for DHCP server to start
 
   if (apStarted) {
-    Serial.println("✓ Access Point started successfully!");
+    Serial.println("✓ Access Point started!");
+
+    // Re-apply config after AP starts (ESP32-S3 quirk)
+    delay(1000);
+    WiFi.softAPConfig(local_IP, gateway, subnet);
+    delay(2000);
+
+    IPAddress IP = WiFi.softAPIP();
+    Serial.println("✓ AP IP Address: " + IP.toString());
+
+    if (IP[0] == 0) {
+      Serial.println("✗ WARNING: IP is 0.0.0.0 - DHCP may not work!");
+    }
   } else {
-    Serial.println("✗ Access Point FAILED!");
+    Serial.println("✗ Access Point FAILED to start!");
   }
 
-  delay(1000);
+  delay(2000);
 
   IPAddress IP = WiFi.softAPIP();
   Serial.println();
@@ -2037,8 +2037,12 @@ void startConfigPortal() {
   Serial.println("Connect your phone to the WiFi network above");
   Serial.println("Then open a browser and go to the URL above");
   Serial.println();
-  Serial.println("DHCP Range: 192.168.4.2 - 192.168.4.10");
+  Serial.println("DHCP Range: 192.168.1.2 - 192.168.1.10");
   Serial.println("Your phone should get an IP in this range");
+  Serial.println("==============================================");
+  Serial.println();
+  Serial.println("!!! WAIT 30 SECONDS after connecting !!!");
+  Serial.println("ESP32-S3 DHCP server needs time to respond");
   Serial.println("==============================================");
   Serial.println();
   Serial.println("Waiting for connections...");
@@ -2089,10 +2093,17 @@ void startConfigPortal() {
   tft.print(text6);
 
   tft.setTextColor(GREEN);
-  String text7 = "192.168.4.1";
+  String text7 = "192.168.1.1";
   int width7 = text7.length() * 6;
   tft.setCursor(120 - width7/2, 180);
   tft.print(text7);
+
+  tft.setTextColor(GRAY);
+  tft.setTextSize(1);
+  String text8 = "WAIT 30 SEC";
+  int width8 = text8.length() * 6;
+  tft.setCursor(120 - width8/2, 200);
+  tft.print(text8);
 
   // Setup DNS server for captive portal
   dnsServer.start(53, "*", WiFi.softAPIP());
