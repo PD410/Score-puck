@@ -11,10 +11,29 @@
 #include <Fonts/FreeSansBold18pt7b.h>
 #include <Fonts/FreeSans18pt7b.h>
 #include <Fonts/FreeSans12pt7b.h>
+#include <WebServer.h>
+#include <Preferences.h>
+#include <ArduinoOTA.h>
+#include <DNSServer.h>
 
-// WiFi credentials
-const char* ssid = "buttfuzz";
-const char* password = "rocket18";
+// Configuration storage
+Preferences preferences;
+WebServer server(80);
+DNSServer dnsServer;
+
+// Configuration variables (loaded from storage)
+String configuredSSID = "";
+String configuredPassword = "";
+int configuredTeamId = 121;  // Default: Mets
+String configuredTeamAbbr = "NYM";
+String configuredTeamName = "Mets";
+uint16_t configuredPrimaryColor = 0x001F;   // Default: Mets Blue
+uint16_t configuredSecondaryColor = 0xFD20;  // Default: Mets Orange
+
+// Configuration mode
+bool configMode = false;
+const char* configSSID = "ScorePuck-Setup";
+const char* configPassword = "scorepuck123";
 
 // Pin assignments
 #define TFT_CS   4
@@ -102,12 +121,23 @@ GameInfo getTestGameData();
 void drawMetsLogoScaled(int x, int y, uint16_t logoColor, float scale);
 bool shouldShowGameTime(GameInfo game);
 int getDaysUntilDate(int targetYear, int targetMonth, int targetDay);
+void loadConfiguration();
+void saveConfiguration();
+void startConfigPortal();
+void handleRoot();
+void handleSave();
+void handleStatus();
+void setupOTA();
+void checkConfigButton();
 
 void setup() {
   Serial.begin(115200);
   delay(1500);
-  
-  Serial.println("=== METS SCOREBOARD v3.0 - OFF-SEASON COUNTDOWN ===");
+
+  Serial.println("=== MLB SCOREPUCK v4.0 - MULTI-TEAM CONFIGURABLE ===");
+
+  // Load saved configuration
+  loadConfiguration();
   
   if (TEST_MODE) {
     Serial.println("*** DEBUG MODE ENABLED ***");
@@ -139,21 +169,38 @@ void setup() {
   
   tft.begin();
   Serial.println("✓ Display initialized");
-  
+
   initializeDMABuffers();
   showStartupScreen();
-  connectToWiFi();
-  
+
+  // Check if we need to enter config mode (no WiFi credentials saved)
+  if (configuredSSID == "" || configMode) {
+    Serial.println("Entering configuration mode...");
+    startConfigPortal();
+  } else {
+    connectToWiFi();
+  }
+
   if (WiFi.status() == WL_CONNECTED) {
+    // Setup OTA updates
+    setupOTA();
+
+    // Setup web server for configuration
+    server.on("/", handleRoot);
+    server.on("/save", HTTP_POST, handleSave);
+    server.on("/status", handleStatus);
+    server.begin();
+    Serial.println("Web server started on http://" + WiFi.localIP().toString());
+
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     setenv("TZ", "PST8PDT,M3.2.0,M11.1.0", 1);
     tzset();
     Serial.println("Time configured for Pacific Time Zone");
-    
+
     delay(2000);
     struct tm timeinfo;
     if (getLocalTime(&timeinfo)) {
-      Serial.printf("Current local time: %04d-%02d-%02d %02d:%02d:%02d\n", 
+      Serial.printf("Current local time: %04d-%02d-%02d %02d:%02d:%02d\n",
                    timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
                    timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
     }
@@ -271,6 +318,12 @@ GameInfo getTestGameData() {
 }
 
 void loop() {
+  // Handle OTA updates
+  ArduinoOTA.handle();
+
+  // Handle web server requests
+  server.handleClient();
+
   if (TEST_MODE) {
     Serial.println("=== TEST MODE ACTIVE ===");
     GameInfo testGame = getTestGameData();
@@ -278,27 +331,27 @@ void loop() {
     delay(10000);
     return;
   }
-  
+
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi disconnected, showing offline screen");
     showOfflineScreen();
     delay(5000);
     return;
   }
-  
+
   String currentDate = getCurrentDate();
   Serial.println("Current date: " + currentDate);
-  
+
   Serial.println("Fetching today's game data...");
   GameInfo game = getGameData(currentDate);
-  
+
   if (!game.hasGame) {
     Serial.println("No game today, looking for next game...");
     game = getNextGame();
-    
+
     if (game.hasGame) {
       Serial.println("Found next game on: " + game.gameDate);
-      
+
       GameInfo prevGame = getPreviousGame();
       if (prevGame.hasGame && prevGame.isFinal) {
         game.inning = "LAST: " + String(prevGame.metsScore) + "-" + String(prevGame.oppScore) + " vs " + prevGame.opponent;
@@ -307,11 +360,17 @@ void loop() {
       Serial.println("No upcoming games found - showing off-season countdown");
     }
   }
-  
+
   displayGame(game);
-  
+
   Serial.println("Waiting 60 seconds for next update...");
-  delay(60000);
+
+  // Instead of blocking delay, check OTA/server in smaller intervals
+  for (int i = 0; i < 60; i++) {
+    ArduinoOTA.handle();
+    server.handleClient();
+    delay(1000);
+  }
 }
 
 bool shouldShowGameTime(GameInfo game) {
@@ -545,7 +604,7 @@ GameInfo getGameData(String date) {
   client.stop();
   
   HTTPClient http;
-  String url = "http://statsapi.mlb.com/api/v1/schedule/games/?sportId=1&teamId=121&date=" + date;
+  String url = "http://statsapi.mlb.com/api/v1/schedule/games/?sportId=1&teamId=" + String(configuredTeamId) + "&date=" + date;
   
   http.begin(url);
   http.setTimeout(20000);
@@ -582,7 +641,7 @@ GameInfo getGameData(String date) {
                   game.homeTeam = getTeamAbbreviation(homeTeamObj["name"].as<String>());
                 }
                 
-                if (homeTeamObj.containsKey("id") && homeTeamObj["id"].as<int>() == 121) {
+                if (homeTeamObj.containsKey("id") && homeTeamObj["id"].as<int>() == configuredTeamId) {
                   foundMets = true;
                   game.metsHome = true;
                 }
@@ -597,7 +656,7 @@ GameInfo getGameData(String date) {
                   game.awayTeam = getTeamAbbreviation(awayTeamObj["name"].as<String>());
                 }
                 
-                if (awayTeamObj.containsKey("id") && awayTeamObj["id"].as<int>() == 121) {
+                if (awayTeamObj.containsKey("id") && awayTeamObj["id"].as<int>() == configuredTeamId) {
                   foundMets = true;
                   game.metsHome = false;
                 }
@@ -1612,7 +1671,7 @@ void connectToWiFi() {
   int innerRadius = 100;
   
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
+  WiFi.begin(configuredSSID.c_str(), configuredPassword.c_str());
   
   int attempts = 0;
   int maxAttempts = 30;
@@ -1805,22 +1864,22 @@ uint16_t interpolateColor(uint16_t color1, uint16_t color2, float factor) {
 void drawMetsLogoScaled(int x, int y, uint16_t logoColor, float scale) {
   int scaledWidth = METS_LOGO_WIDTH * scale;
   int scaledHeight = METS_LOGO_HEIGHT * scale;
-  
+
   for (int16_t j = 0; j < scaledHeight; j++) {
     for (int16_t i = 0; i < scaledWidth; i++) {
       int16_t pixelX = x + i;
       int16_t pixelY = y + j;
-      
+
       if (pixelX < 0 || pixelX >= 240 || pixelY < 0 || pixelY >= 240) continue;
-      
+
       int origX = i / scale;
       int origY = j / scale;
-      
+
       if (origX >= METS_LOGO_WIDTH || origY >= METS_LOGO_HEIGHT) continue;
-      
+
       int16_t byteWidth = (METS_LOGO_WIDTH + 7) / 8;
       uint8_t byte = pgm_read_byte(&mets_logo_bitmap[origY * byteWidth + origX / 8]);
-      
+
       if (byte & (128 >> (origX & 7))) {
         tft.drawPixel(pixelX, pixelY, logoColor);
       } else {
@@ -1829,4 +1888,352 @@ void drawMetsLogoScaled(int x, int y, uint16_t logoColor, float scale) {
       }
     }
   }
+}
+
+// ========== CONFIGURATION FUNCTIONS ==========
+
+void loadConfiguration() {
+  preferences.begin("scorepuck", false);
+
+  configuredSSID = preferences.getString("wifi_ssid", "");
+  configuredPassword = preferences.getString("wifi_pass", "");
+  configuredTeamId = preferences.getInt("team_id", 121);
+  configuredTeamAbbr = preferences.getString("team_abbr", "NYM");
+  configuredTeamName = preferences.getString("team_name", "Mets");
+  configuredPrimaryColor = preferences.getUShort("color_pri", 0x001F);
+  configuredSecondaryColor = preferences.getUShort("color_sec", 0xFD20);
+
+  preferences.end();
+
+  Serial.println("Configuration loaded:");
+  Serial.println("  WiFi SSID: " + configuredSSID);
+  Serial.println("  Team: " + configuredTeamName + " (" + configuredTeamAbbr + ")");
+  Serial.println("  Team ID: " + String(configuredTeamId));
+}
+
+void saveConfiguration() {
+  preferences.begin("scorepuck", false);
+
+  preferences.putString("wifi_ssid", configuredSSID);
+  preferences.putString("wifi_pass", configuredPassword);
+  preferences.putInt("team_id", configuredTeamId);
+  preferences.putString("team_abbr", configuredTeamAbbr);
+  preferences.putString("team_name", configuredTeamName);
+  preferences.putUShort("color_pri", configuredPrimaryColor);
+  preferences.putUShort("color_sec", configuredSecondaryColor);
+
+  preferences.end();
+
+  Serial.println("Configuration saved!");
+}
+
+void startConfigPortal() {
+  configMode = true;
+
+  // Start WiFi AP mode
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(configSSID, configPassword);
+
+  Serial.println("Configuration Portal Started");
+  Serial.println("Connect to WiFi: " + String(configSSID));
+  Serial.println("Password: " + String(configPassword));
+  Serial.println("Then go to: http://192.168.4.1");
+
+  // Display config mode on screen
+  clearScreenWithGradient();
+  tft.setFont(&FreeSansBold12pt7b);
+  tft.setTextColor(WHITE);
+
+  String text1 = "CONFIG MODE";
+  int16_t x1, y1;
+  uint16_t w, h;
+  tft.getTextBounds(text1, 0, 0, &x1, &y1, &w, &h);
+  tft.setCursor(120 - w/2, 60);
+  tft.print(text1);
+
+  tft.setFont();
+  tft.setTextSize(1);
+  tft.setTextColor(WHITE);
+
+  String text2 = "Connect to WiFi:";
+  int width2 = text2.length() * 6;
+  tft.setCursor(120 - width2/2, 90);
+  tft.print(text2);
+
+  tft.setTextColor(METS_ORANGE);
+  String text3 = String(configSSID);
+  int width3 = text3.length() * 6;
+  tft.setCursor(120 - width3/2, 105);
+  tft.print(text3);
+
+  tft.setTextColor(WHITE);
+  String text4 = "Password:";
+  int width4 = text4.length() * 6;
+  tft.setCursor(120 - width4/2, 125);
+  tft.print(text4);
+
+  tft.setTextColor(METS_ORANGE);
+  String text5 = String(configPassword);
+  int width5 = text5.length() * 6;
+  tft.setCursor(120 - width5/2, 140);
+  tft.print(text5);
+
+  tft.setTextColor(WHITE);
+  String text6 = "Then browse to:";
+  int width6 = text6.length() * 6;
+  tft.setCursor(120 - width6/2, 165);
+  tft.print(text6);
+
+  tft.setTextColor(GREEN);
+  String text7 = "192.168.4.1";
+  int width7 = text7.length() * 6;
+  tft.setCursor(120 - width7/2, 180);
+  tft.print(text7);
+
+  // Setup DNS server for captive portal
+  dnsServer.start(53, "*", WiFi.softAPIP());
+
+  // Setup web server
+  server.on("/", handleRoot);
+  server.on("/save", HTTP_POST, handleSave);
+  server.onNotFound(handleRoot);  // Redirect all requests to config page
+  server.begin();
+
+  // Stay in config mode until configured
+  while (configMode) {
+    dnsServer.processNextRequest();
+    server.handleClient();
+    delay(10);
+  }
+}
+
+void handleRoot() {
+  String html = R"(
+<!DOCTYPE html>
+<html>
+<head>
+  <title>ScorePuck Configuration</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial; margin: 20px; background: #f0f0f0; }
+    .container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    h1 { color: #001F3F; text-align: center; }
+    label { display: block; margin-top: 15px; font-weight: bold; }
+    input, select { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; }
+    button { width: 100%; padding: 12px; margin-top: 20px; background: #FF6600; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; }
+    button:hover { background: #FF4400; }
+    .info { background: #e3f2fd; padding: 10px; border-radius: 5px; margin-top: 10px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>⚾ ScorePuck Setup</h1>
+    <form action="/save" method="POST">
+      <h2>WiFi Settings</h2>
+      <label>WiFi Network (SSID):</label>
+      <input type="text" name="ssid" placeholder="Your WiFi Network" required>
+
+      <label>WiFi Password:</label>
+      <input type="password" name="password" placeholder="Your WiFi Password" required>
+
+      <h2>Team Settings</h2>
+      <label>MLB Team:</label>
+      <select name="team" id="teamSelect" onchange="updateTeamInfo()">
+        <option value="109:ARI:Diamondbacks:7841:FC4C02">Arizona Diamondbacks</option>
+        <option value="144:ATL:Braves:002F5F:CE1141">Atlanta Braves</option>
+        <option value="110:BAL:Orioles:DF4601:000000">Baltimore Orioles</option>
+        <option value="111:BOS:Red Sox:BD3039:0C2340">Boston Red Sox</option>
+        <option value="112:CHC:Cubs:0E3386:CC3433">Chicago Cubs</option>
+        <option value="145:CWS:White Sox:27251F:C4CED4">Chicago White Sox</option>
+        <option value="113:CIN:Reds:C6011F:000000">Cincinnati Reds</option>
+        <option value="114:CLE:Guardians:E31937:002B5C">Cleveland Guardians</option>
+        <option value="115:COL:Rockies:33006F:C4CED4">Colorado Rockies</option>
+        <option value="116:DET:Tigers:0C2340:FA4616">Detroit Tigers</option>
+        <option value="117:HOU:Astros:EB6E1F:002D62">Houston Astros</option>
+        <option value="118:KC:Royals:004687:BD9B60">Kansas City Royals</option>
+        <option value="108:LAA:Angels:BA0021:003263">Los Angeles Angels</option>
+        <option value="119:LAD:Dodgers:005A9C:EF3E42">Los Angeles Dodgers</option>
+        <option value="146:MIA:Marlins:00A3E0:EF3340">Miami Marlins</option>
+        <option value="158:MIL:Brewers:FFC52F:12284B">Milwaukee Brewers</option>
+        <option value="142:MIN:Twins:002B5C:D31145">Minnesota Twins</option>
+        <option value="121:NYM:Mets:002D72:FF5910" selected>New York Mets</option>
+        <option value="147:NYY:Yankees:003087:E4002C">New York Yankees</option>
+        <option value="133:OAK:Athletics:003831:EFB21E">Oakland Athletics</option>
+        <option value="143:PHI:Phillies:E81828:002D72">Philadelphia Phillies</option>
+        <option value="134:PIT:Pirates:FDB827:27251F">Pittsburgh Pirates</option>
+        <option value="135:SD:Padres:2F241D:FFC425">San Diego Padres</option>
+        <option value="137:SF:Giants:FD5A1E:27251F">San Francisco Giants</option>
+        <option value="136:SEA:Mariners:0C2C56:005C5C">Seattle Mariners</option>
+        <option value="138:STL:Cardinals:C41E3A:0C2340">St. Louis Cardinals</option>
+        <option value="139:TB:Rays:092C5C:8FBCE6">Tampa Bay Rays</option>
+        <option value="140:TEX:Rangers:003278:C0111F">Texas Rangers</option>
+        <option value="141:TOR:Blue Jays:134A8E:1D2D5C">Toronto Blue Jays</option>
+        <option value="120:WSH:Nationals:AB0003:14225A">Washington Nationals</option>
+      </select>
+
+      <div class="info">
+        <strong>Selected Team:</strong> <span id="teamName">New York Mets</span><br>
+        <strong>Team ID:</strong> <span id="teamId">121</span><br>
+        <strong>Abbreviation:</strong> <span id="teamAbbr">NYM</span>
+      </div>
+
+      <button type="submit">Save & Restart</button>
+    </form>
+
+    <div class="info" style="margin-top: 20px;">
+      <strong>Current Status:</strong><br>
+      WiFi: )" + (WiFi.status() == WL_CONNECTED ? "Connected" : "Not Connected") + R"(<br>
+      Team: )" + configuredTeamName + R"( ()" + configuredTeamAbbr + R"()<br>
+      IP: )" + (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "N/A") + R"(
+    </div>
+  </div>
+
+  <script>
+    function updateTeamInfo() {
+      var select = document.getElementById('teamSelect');
+      var parts = select.value.split(':');
+      document.getElementById('teamId').innerText = parts[0];
+      document.getElementById('teamAbbr').innerText = parts[1];
+      document.getElementById('teamName').innerText = select.options[select.selectedIndex].text;
+    }
+  </script>
+</body>
+</html>
+)";
+
+  server.send(200, "text/html", html);
+}
+
+void handleSave() {
+  if (server.hasArg("ssid") && server.hasArg("password") && server.hasArg("team")) {
+    configuredSSID = server.arg("ssid");
+    configuredPassword = server.arg("password");
+
+    // Parse team selection: "ID:ABBR:NAME:COLOR1:COLOR2"
+    String teamData = server.arg("team");
+    int idx1 = teamData.indexOf(':');
+    int idx2 = teamData.indexOf(':', idx1 + 1);
+    int idx3 = teamData.indexOf(':', idx2 + 1);
+    int idx4 = teamData.indexOf(':', idx3 + 1);
+
+    configuredTeamId = teamData.substring(0, idx1).toInt();
+    configuredTeamAbbr = teamData.substring(idx1 + 1, idx2);
+    configuredTeamName = teamData.substring(idx2 + 1, idx3);
+
+    // Convert hex colors to RGB565
+    String color1Hex = teamData.substring(idx3 + 1, idx4);
+    String color2Hex = teamData.substring(idx4 + 1);
+
+    // Simple hex to RGB565 conversion
+    long c1 = strtol(color1Hex.c_str(), NULL, 16);
+    long c2 = strtol(color2Hex.c_str(), NULL, 16);
+
+    uint8_t r1 = (c1 >> 16) & 0xFF;
+    uint8_t g1 = (c1 >> 8) & 0xFF;
+    uint8_t b1 = c1 & 0xFF;
+    configuredPrimaryColor = ((r1 & 0xF8) << 8) | ((g1 & 0xFC) << 3) | (b1 >> 3);
+
+    uint8_t r2 = (c2 >> 16) & 0xFF;
+    uint8_t g2 = (c2 >> 8) & 0xFF;
+    uint8_t b2 = c2 & 0xFF;
+    configuredSecondaryColor = ((r2 & 0xF8) << 8) | ((g2 & 0xFC) << 3) | (b2 >> 3);
+
+    saveConfiguration();
+
+    String html = R"(
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Configuration Saved</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial; margin: 20px; background: #f0f0f0; text-align: center; }
+    .container { max-width: 500px; margin: 50px auto; background: white; padding: 40px; border-radius: 10px; }
+    h1 { color: #00A000; }
+    p { font-size: 18px; margin: 20px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>✓ Configuration Saved!</h1>
+    <p>ScorePuck will now restart and connect to your WiFi network.</p>
+    <p>The device will be accessible at the IP address shown on the display.</p>
+  </div>
+</body>
+</html>
+)";
+
+    server.send(200, "text/html", html);
+    delay(2000);
+
+    configMode = false;
+    ESP.restart();
+  } else {
+    server.send(400, "text/plain", "Missing required parameters");
+  }
+}
+
+void handleStatus() {
+  String json = "{";
+  json += "\"wifi_connected\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false");
+  json += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
+  json += ",\"team\":\"" + configuredTeamName + "\"";
+  json += ",\"team_abbr\":\"" + configuredTeamAbbr + "\"";
+  json += ",\"team_id\":" + String(configuredTeamId);
+  json += "}";
+
+  server.send(200, "application/json", json);
+}
+
+void setupOTA() {
+  ArduinoOTA.setHostname("ScorePuck");
+  ArduinoOTA.setPassword("scorepuck123");  // Set OTA password
+
+  ArduinoOTA.onStart([]() {
+    Serial.println("OTA Update Starting...");
+    clearScreenWithGradient();
+    tft.setFont(&FreeSansBold12pt7b);
+    tft.setTextColor(YELLOW);
+
+    String text = "UPDATING...";
+    int16_t x1, y1;
+    uint16_t w, h;
+    tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+    tft.setCursor(120 - w/2, 120);
+    tft.print(text);
+    tft.setFont();
+  });
+
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\nOTA Update Complete!");
+    clearScreenWithGradient();
+    tft.setFont(&FreeSansBold12pt7b);
+    tft.setTextColor(GREEN);
+
+    String text = "UPDATE OK!";
+    int16_t x1, y1;
+    uint16_t w, h;
+    tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+    tft.setCursor(120 - w/2, 120);
+    tft.print(text);
+    tft.setFont();
+  });
+
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+  });
+
+  ArduinoOTA.begin();
+  Serial.println("OTA Ready");
+  Serial.println("Use Arduino IDE: Sketch -> Upload Using Programmer");
+  Serial.println("Or use: platformio run --target upload --upload-port ScorePuck.local");
 }
