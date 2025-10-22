@@ -1967,31 +1967,54 @@ void startConfigPortal() {
   Serial.println("Stopping any existing WiFi connections...");
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
-  delay(500);
+  delay(1000);
 
   // Start WiFi AP mode
   Serial.println("Starting Access Point...");
   WiFi.mode(WIFI_AP);
+  delay(1000);
+
+  // Configure static IP for the AP
+  IPAddress local_IP(192, 168, 4, 1);
+  IPAddress gateway(192, 168, 4, 1);
+  IPAddress subnet(255, 255, 255, 0);
+
+  Serial.println("Configuring AP network settings...");
+  Serial.println("  IP: " + local_IP.toString());
+  Serial.println("  Gateway: " + gateway.toString());
+  Serial.println("  Subnet: " + subnet.toString());
+
+  if (!WiFi.softAPConfig(local_IP, gateway, subnet)) {
+    Serial.println("✗ AP Config Failed!");
+  } else {
+    Serial.println("✓ AP Config successful");
+  }
+
   delay(500);
 
   // Configure AP with specific settings for better compatibility
-  // Using channel 1, no password (open network), max 4 connections
+  // Using channel 1, no password (open network), max 4 connections, not hidden
   Serial.println("Configuring Access Point (OPEN - No Password)...");
 
   bool apStarted = WiFi.softAP(configSSID, "", 1, 0, 4);
 
-  // Alternative: Try with password if open fails
+  // Alternative: Try with different channel if open fails
   if (!apStarted) {
-    Serial.println("Open AP failed, trying with password...");
-    apStarted = WiFi.softAP(configSSID, configPassword, 6, 0, 4);
+    Serial.println("Channel 1 failed, trying channel 6...");
+    apStarted = WiFi.softAP(configSSID, "", 6, 0, 4);
+  }
+
+  // Last resort: minimal config
+  if (!apStarted) {
+    Serial.println("Trying minimal configuration...");
+    WiFi.softAPConfig(local_IP, gateway, subnet);
+    apStarted = WiFi.softAP("ScorePuck");
   }
 
   if (apStarted) {
     Serial.println("✓ Access Point started successfully!");
   } else {
     Serial.println("✗ Failed to start Access Point!");
-    Serial.println("Trying minimal configuration...");
-    WiFi.softAP("ScorePuck");
   }
 
   delay(1000);
@@ -2008,8 +2031,12 @@ void startConfigPortal() {
   Serial.println("==============================================");
   Serial.println("Connect your phone to the WiFi network above");
   Serial.println("Then open a browser and go to the URL above");
+  Serial.println();
+  Serial.println("DHCP Range: 192.168.4.2 - 192.168.4.10");
+  Serial.println("Your phone should get an IP in this range");
   Serial.println("==============================================");
   Serial.println();
+  Serial.println("Waiting for connections...");
 
   // Display config mode on screen
   clearScreenWithGradient();
@@ -2072,9 +2099,24 @@ void startConfigPortal() {
   server.begin();
 
   // Stay in config mode until configured
+  int lastClientCount = 0;
+  unsigned long lastStatusPrint = 0;
+
   while (configMode) {
     dnsServer.processNextRequest();
     server.handleClient();
+
+    // Show connection status every 5 seconds
+    if (millis() - lastStatusPrint > 5000) {
+      int clientCount = WiFi.softAPgetStationNum();
+      if (clientCount != lastClientCount) {
+        Serial.print("Connected devices: ");
+        Serial.println(clientCount);
+        lastClientCount = clientCount;
+      }
+      lastStatusPrint = millis();
+    }
+
     delay(10);
   }
 }
