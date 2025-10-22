@@ -901,7 +901,6 @@ void displayGame(GameInfo game) {
       tft.setTextSize(1);
       tft.setTextColor(WHITE);
       tft.setCursor(110, 165);
-     /// tft.print("DAYS");
     } else {
       tft.setFont();
       tft.setTextSize(1);
