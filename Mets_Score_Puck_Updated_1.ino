@@ -2008,98 +2008,87 @@ void startConfigPortal() {
 }
 
 void handleRoot() {
-  String html = R"(
-<!DOCTYPE html>
-<html>
-<head>
-  <title>ScorePuck Configuration</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { font-family: Arial; margin: 20px; background: #f0f0f0; }
-    .container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    h1 { color: #001F3F; text-align: center; }
-    label { display: block; margin-top: 15px; font-weight: bold; }
-    input, select { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; }
-    button { width: 100%; padding: 12px; margin-top: 20px; background: #FF6600; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; }
-    button:hover { background: #FF4400; }
-    .info { background: #e3f2fd; padding: 10px; border-radius: 5px; margin-top: 10px; font-size: 14px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>⚾ ScorePuck Setup</h1>
-    <form action="/save" method="POST">
-      <h2>WiFi Settings</h2>
-      <label>WiFi Network (SSID):</label>
-      <input type="text" name="ssid" placeholder="Your WiFi Network" required>
+  String wifiStatus = WiFi.status() == WL_CONNECTED ? "Connected" : "Not Connected";
+  String ipAddress = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "N/A";
 
-      <label>WiFi Password:</label>
-      <input type="password" name="password" placeholder="Your WiFi Password" required>
-
-      <h2>Team Settings</h2>
-      <label>MLB Team:</label>
-      <select name="team" id="teamSelect" onchange="updateTeamInfo()">
-        <option value="109:ARI:Diamondbacks:7841:FC4C02">Arizona Diamondbacks</option>
-        <option value="144:ATL:Braves:002F5F:CE1141">Atlanta Braves</option>
-        <option value="110:BAL:Orioles:DF4601:000000">Baltimore Orioles</option>
-        <option value="111:BOS:Red Sox:BD3039:0C2340">Boston Red Sox</option>
-        <option value="112:CHC:Cubs:0E3386:CC3433">Chicago Cubs</option>
-        <option value="145:CWS:White Sox:27251F:C4CED4">Chicago White Sox</option>
-        <option value="113:CIN:Reds:C6011F:000000">Cincinnati Reds</option>
-        <option value="114:CLE:Guardians:E31937:002B5C">Cleveland Guardians</option>
-        <option value="115:COL:Rockies:33006F:C4CED4">Colorado Rockies</option>
-        <option value="116:DET:Tigers:0C2340:FA4616">Detroit Tigers</option>
-        <option value="117:HOU:Astros:EB6E1F:002D62">Houston Astros</option>
-        <option value="118:KC:Royals:004687:BD9B60">Kansas City Royals</option>
-        <option value="108:LAA:Angels:BA0021:003263">Los Angeles Angels</option>
-        <option value="119:LAD:Dodgers:005A9C:EF3E42">Los Angeles Dodgers</option>
-        <option value="146:MIA:Marlins:00A3E0:EF3340">Miami Marlins</option>
-        <option value="158:MIL:Brewers:FFC52F:12284B">Milwaukee Brewers</option>
-        <option value="142:MIN:Twins:002B5C:D31145">Minnesota Twins</option>
-        <option value="121:NYM:Mets:002D72:FF5910" selected>New York Mets</option>
-        <option value="147:NYY:Yankees:003087:E4002C">New York Yankees</option>
-        <option value="133:OAK:Athletics:003831:EFB21E">Oakland Athletics</option>
-        <option value="143:PHI:Phillies:E81828:002D72">Philadelphia Phillies</option>
-        <option value="134:PIT:Pirates:FDB827:27251F">Pittsburgh Pirates</option>
-        <option value="135:SD:Padres:2F241D:FFC425">San Diego Padres</option>
-        <option value="137:SF:Giants:FD5A1E:27251F">San Francisco Giants</option>
-        <option value="136:SEA:Mariners:0C2C56:005C5C">Seattle Mariners</option>
-        <option value="138:STL:Cardinals:C41E3A:0C2340">St. Louis Cardinals</option>
-        <option value="139:TB:Rays:092C5C:8FBCE6">Tampa Bay Rays</option>
-        <option value="140:TEX:Rangers:003278:C0111F">Texas Rangers</option>
-        <option value="141:TOR:Blue Jays:134A8E:1D2D5C">Toronto Blue Jays</option>
-        <option value="120:WSH:Nationals:AB0003:14225A">Washington Nationals</option>
-      </select>
-
-      <div class="info">
-        <strong>Selected Team:</strong> <span id="teamName">New York Mets</span><br>
-        <strong>Team ID:</strong> <span id="teamId">121</span><br>
-        <strong>Abbreviation:</strong> <span id="teamAbbr">NYM</span>
-      </div>
-
-      <button type="submit">Save & Restart</button>
-    </form>
-
-    <div class="info" style="margin-top: 20px;">
-      <strong>Current Status:</strong><br>
-      WiFi: )" + (WiFi.status() == WL_CONNECTED ? "Connected" : "Not Connected") + R"(<br>
-      Team: )" + configuredTeamName + R"( ()" + configuredTeamAbbr + R"()<br>
-      IP: )" + (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "N/A") + R"(
-    </div>
-  </div>
-
-  <script>
-    function updateTeamInfo() {
-      var select = document.getElementById('teamSelect');
-      var parts = select.value.split(':');
-      document.getElementById('teamId').innerText = parts[0];
-      document.getElementById('teamAbbr').innerText = parts[1];
-      document.getElementById('teamName').innerText = select.options[select.selectedIndex].text;
-    }
-  </script>
-</body>
-</html>
-)";
+  String html = "<!DOCTYPE html><html><head>";
+  html += "<title>ScorePuck Configuration</title>";
+  html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+  html += "<style>";
+  html += "body { font-family: Arial; margin: 20px; background: #f0f0f0; }";
+  html += ".container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }";
+  html += "h1 { color: #001F3F; text-align: center; }";
+  html += "label { display: block; margin-top: 15px; font-weight: bold; }";
+  html += "input, select { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; }";
+  html += "button { width: 100%; padding: 12px; margin-top: 20px; background: #FF6600; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; }";
+  html += "button:hover { background: #FF4400; }";
+  html += ".info { background: #e3f2fd; padding: 10px; border-radius: 5px; margin-top: 10px; font-size: 14px; }";
+  html += "</style></head><body>";
+  html += "<div class='container'>";
+  html += "<h1>&#9917; ScorePuck Setup</h1>";
+  html += "<form action='/save' method='POST'>";
+  html += "<h2>WiFi Settings</h2>";
+  html += "<label>WiFi Network (SSID):</label>";
+  html += "<input type='text' name='ssid' placeholder='Your WiFi Network' required>";
+  html += "<label>WiFi Password:</label>";
+  html += "<input type='password' name='password' placeholder='Your WiFi Password' required>";
+  html += "<h2>Team Settings</h2>";
+  html += "<label>MLB Team:</label>";
+  html += "<select name='team' id='teamSelect' onchange='updateTeamInfo()'>";
+  html += "<option value='109:ARI:Diamondbacks:7841:FC4C02'>Arizona Diamondbacks</option>";
+  html += "<option value='144:ATL:Braves:002F5F:CE1141'>Atlanta Braves</option>";
+  html += "<option value='110:BAL:Orioles:DF4601:000000'>Baltimore Orioles</option>";
+  html += "<option value='111:BOS:Red Sox:BD3039:0C2340'>Boston Red Sox</option>";
+  html += "<option value='112:CHC:Cubs:0E3386:CC3433'>Chicago Cubs</option>";
+  html += "<option value='145:CWS:White Sox:27251F:C4CED4'>Chicago White Sox</option>";
+  html += "<option value='113:CIN:Reds:C6011F:000000'>Cincinnati Reds</option>";
+  html += "<option value='114:CLE:Guardians:E31937:002B5C'>Cleveland Guardians</option>";
+  html += "<option value='115:COL:Rockies:33006F:C4CED4'>Colorado Rockies</option>";
+  html += "<option value='116:DET:Tigers:0C2340:FA4616'>Detroit Tigers</option>";
+  html += "<option value='117:HOU:Astros:EB6E1F:002D62'>Houston Astros</option>";
+  html += "<option value='118:KC:Royals:004687:BD9B60'>Kansas City Royals</option>";
+  html += "<option value='108:LAA:Angels:BA0021:003263'>Los Angeles Angels</option>";
+  html += "<option value='119:LAD:Dodgers:005A9C:EF3E42'>Los Angeles Dodgers</option>";
+  html += "<option value='146:MIA:Marlins:00A3E0:EF3340'>Miami Marlins</option>";
+  html += "<option value='158:MIL:Brewers:FFC52F:12284B'>Milwaukee Brewers</option>";
+  html += "<option value='142:MIN:Twins:002B5C:D31145'>Minnesota Twins</option>";
+  html += "<option value='121:NYM:Mets:002D72:FF5910' selected>New York Mets</option>";
+  html += "<option value='147:NYY:Yankees:003087:E4002C'>New York Yankees</option>";
+  html += "<option value='133:OAK:Athletics:003831:EFB21E'>Oakland Athletics</option>";
+  html += "<option value='143:PHI:Phillies:E81828:002D72'>Philadelphia Phillies</option>";
+  html += "<option value='134:PIT:Pirates:FDB827:27251F'>Pittsburgh Pirates</option>";
+  html += "<option value='135:SD:Padres:2F241D:FFC425'>San Diego Padres</option>";
+  html += "<option value='137:SF:Giants:FD5A1E:27251F'>San Francisco Giants</option>";
+  html += "<option value='136:SEA:Mariners:0C2C56:005C5C'>Seattle Mariners</option>";
+  html += "<option value='138:STL:Cardinals:C41E3A:0C2340'>St. Louis Cardinals</option>";
+  html += "<option value='139:TB:Rays:092C5C:8FBCE6'>Tampa Bay Rays</option>";
+  html += "<option value='140:TEX:Rangers:003278:C0111F'>Texas Rangers</option>";
+  html += "<option value='141:TOR:Blue Jays:134A8E:1D2D5C'>Toronto Blue Jays</option>";
+  html += "<option value='120:WSH:Nationals:AB0003:14225A'>Washington Nationals</option>";
+  html += "</select>";
+  html += "<div class='info'>";
+  html += "<strong>Selected Team:</strong> <span id='teamName'>New York Mets</span><br>";
+  html += "<strong>Team ID:</strong> <span id='teamId'>121</span><br>";
+  html += "<strong>Abbreviation:</strong> <span id='teamAbbr'>NYM</span>";
+  html += "</div>";
+  html += "<button type='submit'>Save & Restart</button>";
+  html += "</form>";
+  html += "<div class='info' style='margin-top: 20px;'>";
+  html += "<strong>Current Status:</strong><br>";
+  html += "WiFi: " + wifiStatus + "<br>";
+  html += "Team: " + configuredTeamName + " (" + configuredTeamAbbr + ")<br>";
+  html += "IP: " + ipAddress;
+  html += "</div></div>";
+  html += "<script>";
+  html += "function updateTeamInfo() {";
+  html += "var select = document.getElementById('teamSelect');";
+  html += "var parts = select.value.split(':');";
+  html += "document.getElementById('teamId').innerText = parts[0];";
+  html += "document.getElementById('teamAbbr').innerText = parts[1];";
+  html += "document.getElementById('teamName').innerText = select.options[select.selectedIndex].text;";
+  html += "}";
+  html += "</script>";
+  html += "</body></html>";
 
   server.send(200, "text/html", html);
 }
@@ -2140,28 +2129,20 @@ void handleSave() {
 
     saveConfiguration();
 
-    String html = R"(
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Configuration Saved</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { font-family: Arial; margin: 20px; background: #f0f0f0; text-align: center; }
-    .container { max-width: 500px; margin: 50px auto; background: white; padding: 40px; border-radius: 10px; }
-    h1 { color: #00A000; }
-    p { font-size: 18px; margin: 20px 0; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>✓ Configuration Saved!</h1>
-    <p>ScorePuck will now restart and connect to your WiFi network.</p>
-    <p>The device will be accessible at the IP address shown on the display.</p>
-  </div>
-</body>
-</html>
-)";
+    String html = "<!DOCTYPE html><html><head>";
+    html += "<title>Configuration Saved</title>";
+    html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+    html += "<style>";
+    html += "body { font-family: Arial; margin: 20px; background: #f0f0f0; text-align: center; }";
+    html += ".container { max-width: 500px; margin: 50px auto; background: white; padding: 40px; border-radius: 10px; }";
+    html += "h1 { color: #00A000; }";
+    html += "p { font-size: 18px; margin: 20px 0; }";
+    html += "</style></head><body>";
+    html += "<div class='container'>";
+    html += "<h1>&#10004; Configuration Saved!</h1>";
+    html += "<p>ScorePuck will now restart and connect to your WiFi network.</p>";
+    html += "<p>The device will be accessible at the IP address shown on the display.</p>";
+    html += "</div></body></html>";
 
     server.send(200, "text/html", html);
     delay(2000);
