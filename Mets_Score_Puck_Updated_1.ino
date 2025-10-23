@@ -2047,122 +2047,61 @@ void startConfigPortal() {
   Serial.println();
   Serial.println("Waiting for connections...");
 
-  // TEMPORARILY SKIP TFT DISPLAY UPDATES TO TEST WEB SERVER
-  // Display config mode on screen
-  Serial.println("Updating display... (skipping for now to test web server)");
-  /*
-  clearScreenWithGradient();
-  tft.setFont(&FreeSansBold12pt7b);
-  tft.setTextColor(WHITE);
-
-  String text1 = "CONFIG MODE";
-  int16_t x1, y1;
-  uint16_t w, h;
-  tft.getTextBounds(text1, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor(120 - w/2, 60);
-  tft.print(text1);
-
-  tft.setFont();
-  tft.setTextSize(1);
-  tft.setTextColor(WHITE);
-
-  String text2 = "Connect to WiFi:";
-  int width2 = text2.length() * 6;
-  tft.setCursor(120 - width2/2, 90);
-  tft.print(text2);
-
-  tft.setTextColor(METS_ORANGE);
-  String text3 = String(configSSID);
-  int width3 = text3.length() * 6;
-  tft.setCursor(120 - width3/2, 105);
-  tft.print(text3);
-
-  tft.setTextColor(WHITE);
-  String text4 = "NO PASSWORD";
-  int width4 = text4.length() * 6;
-  tft.setCursor(120 - width4/2, 125);
-  tft.print(text4);
-
-  tft.setTextColor(GRAY);
-  String text5 = "(Open Network)";
-  int width5 = text5.length() * 6;
-  tft.setCursor(120 - width5/2, 140);
-  tft.print(text5);
-
-  tft.setTextColor(WHITE);
-  String text6 = "Then browse to:";
-  int width6 = text6.length() * 6;
-  tft.setCursor(120 - width6/2, 165);
-  tft.print(text6);
-
-  tft.setTextColor(GREEN);
-  String text7 = "192.168.1.1";
-  int width7 = text7.length() * 6;
-  tft.setCursor(120 - width7/2, 180);
-  tft.print(text7);
-
-  tft.setTextColor(GRAY);
-  tft.setTextSize(1);
-  String text8 = "WAIT 30 SEC";
-  int width8 = text8.length() * 6;
-  tft.setCursor(120 - width8/2, 200);
-  tft.print(text8);
-  */
+  // SKIP TFT display updates entirely - they block web server startup
+  Serial.println("(TFT display updates disabled in config mode to ensure web server works)");
 
   // Setup DNS server for captive portal
   IPAddress dns_ip = WiFi.softAPIP();
+  Serial.println();
   Serial.println("Starting DNS server on: " + dns_ip.toString());
   dnsServer.start(53, "*", dns_ip);
   delay(500);
+  Serial.println("✓ DNS server started");
 
   // Setup web server routes
+  Serial.println();
   Serial.println("Setting up web server routes...");
   server.on("/", handleRoot);
   server.on("/save", HTTP_POST, handleSave);
-  server.onNotFound(handleRoot);  // Redirect all requests to config page
+  server.onNotFound(handleRoot);
+  Serial.println("✓ Routes configured");
 
   // Start web server on port 80
+  Serial.println();
   Serial.println("Starting web server on port 80...");
   server.begin();
-  delay(2000);  // Give server time to fully start
+  delay(2000);
+  Serial.println("✓ Web server started");
 
   Serial.println();
+  Serial.println("========================================");
   Serial.println("✓✓✓ WEB SERVER IS READY ✓✓✓");
-  Serial.println("You can now connect from your phone!");
-  Serial.println("Open browser and go to: http://" + WiFi.softAPIP().toString());
+  Serial.println("========================================");
+  Serial.println("Connect phone to: ScorePuck-Setup");
+  Serial.println("Manual IP: 192.168.1.2");
+  Serial.println("Gateway: 192.168.1.1");
+  Serial.println("Then browse to: http://192.168.1.1");
+  Serial.println("========================================");
   Serial.println();
 
   // Stay in config mode until configured
-  int lastClientCount = 0;
   unsigned long lastStatusPrint = 0;
-  unsigned long requestCount = 0;
 
   while (configMode) {
+    // Process DNS requests
     dnsServer.processNextRequest();
 
-    // Handle web requests and count them
-    unsigned long before = millis();
+    // Process web requests
     server.handleClient();
-    unsigned long after = millis();
 
-    // If handleClient took time, it processed a request
-    if (after - before > 1) {
-      requestCount++;
-      Serial.println(">>> HTTP Request #" + String(requestCount) + " received!");
-    }
-
-    // Show connection status every 5 seconds
-    if (millis() - lastStatusPrint > 5000) {
+    // Show status every 3 seconds
+    if (millis() - lastStatusPrint > 3000) {
       int clientCount = WiFi.softAPgetStationNum();
-      if (clientCount != lastClientCount) {
-        Serial.print("Connected devices: ");
-        Serial.println(clientCount);
-        lastClientCount = clientCount;
-      }
+      Serial.print("Connected devices: ");
+      Serial.println(clientCount);
 
       if (clientCount > 0) {
-        Serial.println("Phone is connected! Try browsing to http://192.168.1.1");
-        Serial.println("Total HTTP requests received: " + String(requestCount));
+        Serial.println("  >> Phone connected! Browse to http://192.168.1.1");
       }
 
       lastStatusPrint = millis();
