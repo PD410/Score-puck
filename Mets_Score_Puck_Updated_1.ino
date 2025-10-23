@@ -346,6 +346,13 @@ void loop() {
   // Handle web server requests
   server.handleClient();
 
+  // If in config mode, just keep handling web requests (don't check WiFi client status)
+  if (configMode) {
+    dnsServer.processNextRequest();  // Handle captive portal DNS requests
+    delay(10);  // Small delay to prevent watchdog issues
+    return;
+  }
+
   if (TEST_MODE) {
     Serial.println("=== TEST MODE ACTIVE ===");
     GameInfo testGame = getTestGameData();
