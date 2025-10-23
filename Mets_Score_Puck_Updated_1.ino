@@ -2106,21 +2106,46 @@ void startConfigPortal() {
   tft.print(text8);
 
   // Setup DNS server for captive portal
-  dnsServer.start(53, "*", WiFi.softAPIP());
+  IPAddress dns_ip = WiFi.softAPIP();
+  Serial.println("Starting DNS server on: " + dns_ip.toString());
+  dnsServer.start(53, "*", dns_ip);
+  delay(500);
 
-  // Setup web server
+  // Setup web server routes
+  Serial.println("Setting up web server routes...");
   server.on("/", handleRoot);
   server.on("/save", HTTP_POST, handleSave);
   server.onNotFound(handleRoot);  // Redirect all requests to config page
+
+  // Start web server on port 80
+  Serial.println("Starting web server on port 80...");
   server.begin();
+  delay(2000);  // Give server time to fully start
+
+  Serial.println();
+  Serial.println("✓✓✓ WEB SERVER IS READY ✓✓✓");
+  Serial.println("You can now connect from your phone!");
+  Serial.println("Open browser and go to: http://" + WiFi.softAPIP().toString());
+  Serial.println();
 
   // Stay in config mode until configured
   int lastClientCount = 0;
   unsigned long lastStatusPrint = 0;
+  unsigned long requestCount = 0;
 
   while (configMode) {
     dnsServer.processNextRequest();
+
+    // Handle web requests and count them
+    unsigned long before = millis();
     server.handleClient();
+    unsigned long after = millis();
+
+    // If handleClient took time, it processed a request
+    if (after - before > 1) {
+      requestCount++;
+      Serial.println(">>> HTTP Request #" + String(requestCount) + " received!");
+    }
 
     // Show connection status every 5 seconds
     if (millis() - lastStatusPrint > 5000) {
@@ -2130,6 +2155,12 @@ void startConfigPortal() {
         Serial.println(clientCount);
         lastClientCount = clientCount;
       }
+
+      if (clientCount > 0) {
+        Serial.println("Phone is connected! Try browsing to http://192.168.1.1");
+        Serial.println("Total HTTP requests received: " + String(requestCount));
+      }
+
       lastStatusPrint = millis();
     }
 
@@ -2138,9 +2169,12 @@ void startConfigPortal() {
 }
 
 void handleRoot() {
+  Serial.println(">>> handleRoot() called - Generating config page...");
+
   String wifiStatus = WiFi.status() == WL_CONNECTED ? "Connected" : "Not Connected";
   String ipAddress = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "N/A";
 
+  Serial.println("    Building HTML page...");
   String html = "<!DOCTYPE html><html><head>";
   html += "<title>ScorePuck Configuration</title>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
@@ -2220,7 +2254,9 @@ void handleRoot() {
   html += "</script>";
   html += "</body></html>";
 
+  Serial.println("    Sending HTML page (" + String(html.length()) + " bytes)...");
   server.send(200, "text/html", html);
+  Serial.println("    ✓ Page sent successfully!");
 }
 
 void handleSave() {
