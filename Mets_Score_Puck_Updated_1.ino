@@ -2047,7 +2047,10 @@ void startConfigPortal() {
   Serial.println();
   Serial.println("Waiting for connections...");
 
+  // TEMPORARILY SKIP TFT DISPLAY UPDATES TO TEST WEB SERVER
   // Display config mode on screen
+  Serial.println("Updating display... (skipping for now to test web server)");
+  /*
   clearScreenWithGradient();
   tft.setFont(&FreeSansBold12pt7b);
   tft.setTextColor(WHITE);
@@ -2104,6 +2107,7 @@ void startConfigPortal() {
   int width8 = text8.length() * 6;
   tft.setCursor(120 - width8/2, 200);
   tft.print(text8);
+  */
 
   // Setup DNS server for captive portal
   IPAddress dns_ip = WiFi.softAPIP();
