@@ -69,7 +69,7 @@ const bool TEST_MODE = false;
 const int DEBUG_SCENARIO = 2;
 
 // FORCE CONFIG MODE - Set to true to force configuration portal on boot
-const bool FORCE_CONFIG_MODE = false;
+const bool FORCE_CONFIG_MODE = true;
 
 // Game data structure
 struct GameInfo {
