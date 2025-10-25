@@ -2091,31 +2091,8 @@ void startConfigPortal() {
   Serial.println("========================================");
   Serial.println();
 
-  // Stay in config mode until configured
-  unsigned long lastStatusPrint = 0;
-
-  while (configMode) {
-    // Process DNS requests
-    dnsServer.processNextRequest();
-
-    // Process web requests
-    server.handleClient();
-
-    // Show status every 3 seconds
-    if (millis() - lastStatusPrint > 3000) {
-      int clientCount = WiFi.softAPgetStationNum();
-      Serial.print("Connected devices: ");
-      Serial.println(clientCount);
-
-      if (clientCount > 0) {
-        Serial.println("  >> Phone connected! Browse to http://192.168.1.1");
-      }
-
-      lastStatusPrint = millis();
-    }
-
-    delay(10);
-  }
+  // Return to loop() - it will handle server.handleClient() and dnsServer.processNextRequest()
+  // when configMode is true
 }
 
 void handleRoot() {
